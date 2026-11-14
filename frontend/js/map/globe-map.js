@@ -144,26 +144,33 @@ export async function createGlobeMap({ container }) {
     }
   }
 
+  // Las escenas pesan decenas de MB: se descargan la primera vez que se activa su capa,
+  // no al abrir la página.
   const seriesLayers = [];
+  const requestedScenes = new Set();
+  function loadScenesOnDemand(state) {
+    for (const layer of LAYERS.filter(isSceneLayer)) {
+      if (!state.layers[layer.id] || requestedScenes.has(layer.id)) continue;
+      requestedScenes.add(layer.id);
+      const entry = SCENES.find((scene) => scene.id === layer.sceneId);
+      loadScene(entry.dataUrl)
+        .then((scene) => {
+          seriesLayers.push(
+            createSeriesLayer(map, { layerId: layer.id, scene, species: entry.species, beforeId })
+          );
+          sync(store.getState());
+        })
+        .catch((error) => console.warn(`[mapa] Sin datos para la capa "${layer.id}":`, error));
+    }
+  }
+
   const sync = (state) => {
     syncLayers(map, state);
     syncAppearance(state);
+    loadScenesOnDemand(state);
     for (const series of seriesLayers) series.sync(state);
   };
   sync(store.getState());
-
-  Promise.all(
-    LAYERS.filter(isSceneLayer).map(async (layer) => {
-      const entry = SCENES.find((scene) => scene.id === layer.sceneId);
-      const scene = await loadScene(entry.dataUrl);
-      seriesLayers.push(
-        createSeriesLayer(map, { layerId: layer.id, scene, species: entry.species, beforeId })
-      );
-    })
-  )
-    .then(() => sync(store.getState()))
-    .catch((error) => console.warn('[mapa] Sin capas de datos:', error));
-
 
   // Puntos de tierra + brillo al pasar el cursor. Si fallan, el mapa sigue funcionando.
   let hoverGlow = null;

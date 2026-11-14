@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-from backend.geosfp.grid import describe_grid
+from geosfp.grid import describe_grid
 
 DEFAULT_SOURCE = Path("data/raw/geosfp_aer_europe_20260724_20260728.nc")
 DEFAULT_SCENE_ID = "europe-smoke-2026-07"
@@ -63,8 +63,10 @@ def build(source: Path, scene_id: str) -> None:
                 "display_scale_max": scale,
                 "display_scale_method": f"p{SCALE_PERCENTILE:g} over all steps and cells of this scene",
             }
-            print(f"{key:13s} min={values.min():.4g} max={values.max():.4g} "
-                  f"escala={scale} archivo={path.stat().st_size / 1e6:.2f} MB")
+            print(
+                f"{key:13s} min={values.min():.4g} max={values.max():.4g} "
+                f"escala={scale} archivo={path.stat().st_size / 1e6:.2f} MB"
+            )
 
         manifest = {
             "schema_version": 2,

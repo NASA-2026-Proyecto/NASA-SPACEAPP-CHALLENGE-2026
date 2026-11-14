@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from backend.geosfp.normalize import normalize
+from geosfp.normalize import normalize
 
 SOURCE = Path("data/raw/geosfp_aer_iberia_20261101T0430Z.nc")
 DESTINATION = Path("data/processed/aerosols_iberia_20261101T0430Z.json")

@@ -1,10 +1,10 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from backend.geosfp.episode import download_episode
+from geosfp.episode import download_episode
 
-START = datetime(2026, 7, 24, 1, 0, tzinfo=timezone.utc)
-END = datetime(2026, 7, 28, 23, 0, tzinfo=timezone.utc)
+START = datetime(2026, 7, 24, 1, 0, tzinfo=UTC)
+END = datetime(2026, 7, 28, 23, 0, tzinfo=UTC)
 VARIABLES = ["brexttau", "bcexttau", "duexttau", "suexttau", "ssexttau"]
 OUT = Path("data/raw/geosfp_aer_global_1deg_20260724_20260728.nc")
 
