@@ -1,0 +1,30 @@
+# --- Secrets / local configuration ------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Python / uv --------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Editors ------------------------------------------------------------------
+# Shared VS Code settings (debug configs, recommended extensions) are versioned
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+
+# --- OS -----------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Tool inputs that are too large for the repo -------------------------------
+# Source image for tools/make-night-tiles.py
+*.tif
