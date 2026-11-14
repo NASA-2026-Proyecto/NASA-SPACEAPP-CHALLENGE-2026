@@ -13,6 +13,7 @@ const STYLE = 'https://tiles.openfreemap.org/styles/dark';
 const INITIAL_VIEW = { center: [-30, 25], zoom: 1.6 };
 const PLACES = { spain: { center: [-3.7, 40.4], zoom: 5.2 } };
 const LOAD_TIMEOUT_MS = 20000;
+const ON_GLOBE_TOLERANCE_PX = 2;
 
 const BASEMAP_ID = 'nasa-blue-marble';
 const BASEMAP_TILES =
@@ -159,6 +160,10 @@ export async function createGlobeMap({ container }) {
   const unsubscribe = store.subscribe(sync);
   const stopSpin = startAutoSpin(map);
 
+  // Un único popup reutilizable. closeOnClick: false porque es el propio clic en el
+  // mapa el que lo mueve; focusAfterOpen: false para no robar el foco en cada clic.
+  let popup = null;
+
   return {
     map,
     flyTo(name) {
@@ -167,10 +172,29 @@ export async function createGlobeMap({ container }) {
       stopSpin();
       map.flyTo({ ...place, duration: 4000 });
     },
+    // En proyección globo, un clic en el espacio (fuera de la esfera) también trae
+    // coordenadas: las de un punto del borde. Si al proyectarlas de vuelta no caen
+    // donde se hizo clic, el clic no fue sobre la Tierra.
+    isOnGlobe({ point, lngLat }) {
+      const back = map.project(lngLat);
+      return Math.hypot(back.x - point.x, back.y - point.y) <= ON_GLOBE_TOLERANCE_PX;
+    },
+    showPopup(lngLat, content) {
+      popup ??= new maplibregl.Popup({
+        className: 'ej-popup',
+        closeOnClick: false,
+        focusAfterOpen: false,
+        maxWidth: '280px',
+        offset: 12,
+      });
+      popup.setLngLat(lngLat).setDOMContent(content);
+      if (!popup.isOpen()) popup.addTo(map);
+    },
     destroy() {
       unsubscribe();
       hoverGlow?.destroy();
       stopSpin();
+      popup?.remove();
       map.remove();
     },
   };
