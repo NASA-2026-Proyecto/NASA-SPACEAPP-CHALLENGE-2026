@@ -1,0 +1,5 @@
+data/raw/
+
+for pattern in ".DS_Store" "__pycache__/" "*.pyc" "data/raw/" "data/processed/"; do
+  grep -qxF "$pattern" .gitignore || echo "$pattern" >> .gitignore
+done

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from backend.geosfp.grid import regular_step
 import xarray as xr
 
 SPECIES = {
@@ -14,12 +15,6 @@ SPECIES = {
 SIGNIFICANT_DIGITS = 5
 SCHEMA_VERSION = 1
 
-
-def _regular_step(axis: np.ndarray, name: str) -> float:
-    steps = np.diff(axis.astype("float64"))
-    if steps.size == 0 or not np.allclose(steps, steps[0], rtol=0, atol=1e-6) or steps[0] <= 0:
-        raise ValueError(f"El eje '{name}' no es regular y ascendente.")
-    return float(steps[0])
 
 
 def _validate(variable: str, values: np.ndarray, shape: tuple[int, int]) -> None:
@@ -41,8 +36,8 @@ def normalize(source: Path, destination: Path) -> dict:
         lon = ds["lon"].values
         shape = (lat.size, lon.size)
         grid = {
-            "lat_min": float(lat[0]), "lat_step": _regular_step(lat, "lat"),
-            "lon_min": float(lon[0]), "lon_step": _regular_step(lon, "lon"),
+            "lat_min": float(lat[0]), "lat_step": regular_step(lat, "lat"),
+            "lon_min": float(lon[0]), "lon_step": regular_step(lon, "lon"),
             "n_lat": int(lat.size), "n_lon": int(lon.size),
             "order": "row-major; rows south to north, columns west to east",
         }
