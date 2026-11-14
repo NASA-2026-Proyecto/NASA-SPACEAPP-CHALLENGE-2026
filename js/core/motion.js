@@ -1,0 +1,1 @@
+export const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');

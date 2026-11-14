@@ -1,0 +1,57 @@
+:root {
+    /* Colores */
+    --ej-bg-deep: #050912;
+    --ej-bg-mid: #0b1426;
+    --ej-surface: #15243d;
+    --ej-border: rgba(120, 170, 255, 0.25);
+    --ej-text: #f3f6fc;
+    --ej-text-muted: #a5b3c7;
+    --ej-accent: #409dff;
+    --ej-accent-strong: #62c8ff;
+    --ej-fire: #ff9857;
+    --ej-rain: #62c8ff;
+    --ej-star: #dbe8ff;
+  
+    /* Tipografía: pila del sistema (sin descargas externas) */
+    --ej-font-display: "Funnel Sans", "Space Grotesk", system-ui, sans-serif;
+    --ej-font-body:
+      "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --ej-text-hero: clamp(2.5rem, 1.8rem + 3.2vw, 4.25rem);
+    --ej-text-lead: clamp(1rem, 0.95rem + 0.3vw, 1.2rem);
+    --ej-text-eyebrow: 0.75rem;
+  
+    /* Forma y espacio */
+    --ej-radius-pill: 999px;
+    --ej-space-sm: 0.5rem;
+    --ej-space-md: 1rem;
+    --ej-space-lg: 2rem;
+  
+    /* Movimiento */
+    --ej-transition: 200ms ease;
+    --ej-transition-slow: 400ms ease;
+    --ej-radius-md: 0.75rem;
+    --ej-shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.35);
+  
+    /* Espacio extra y movimiento */
+    --ej-space-xl: 4rem;
+    --ej-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  
+    /* Globo 3D de la portada */
+    --ej-globe-ocean: #061725;
+    --ej-globe-land: #066fa8;
+    --ej-globe-outline: #75f3ef;
+  
+    --ej-globe-dot: #7fb4ff;
+    --ej-globe-rim: #62c8ff;
+    --ej-globe-atmosphere: #7fb4ff;
+    --ej-globe-highlight: #cfeaff;
+  
+    /* Explorador: colores de capas, cristal y modo noche */
+    --ej-aerosol: #ffb454;
+    --ej-violet: #8f7cff;
+    --ej-teal: #4fe0d0;
+    --ej-night-glow: #ffd9a0;
+    --ej-glass: linear-gradient(160deg, rgba(22, 40, 78, 0.66), rgba(8, 15, 34, 0.72));
+    --ej-glass-border: rgba(140, 180, 255, 0.22);
+  }
+  

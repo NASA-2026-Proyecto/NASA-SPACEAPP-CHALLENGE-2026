@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="es" data-bs-theme="dark">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Earth Jukebox</title>
+  <meta name="description" content="Explora y escucha datos de observación de la Tierra.">
+  <meta name="theme-color" content="#050912">
+  <meta property="og:title" content="Earth Jukebox">
+  <meta property="og:description" content="Explora y escucha datos de observación de la Tierra.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+
+  <link rel="preload" href="assets/fonts/space-grotesk-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/inter-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/funnel-sans-v3-latin-regular.woff2" as="font" type="font/woff2" crossorigin>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet"
+    integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+
+  <link rel="stylesheet" href="css/fonts.css">
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/landing.css">
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+
+<body class="landing">
+  <header class="landing__header">
+    <a class="landing__brand" href="index.html" aria-label="Earth Jukebox, inicio">
+      <!-- ICONO INDEX-->
+      <svg class="landing__brand-icon" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true">
+        <!-- Planeta -->
+        <circle cx="20" cy="20" r="15" stroke="currentColor" stroke-width="1.5" />
+
+        <!-- Líneas del globo -->
+        <path d="M5.8 16H34.2 M5.8 24H34.2" stroke="currentColor" stroke-width="0.8" opacity="0.6" />
+
+        <path d="M20 5C11 13 11 27 20 35
+       M20 5C29 13 29 27 20 35" stroke="currentColor" stroke-width="0.8" opacity="0.6" />
+
+        <!-- Onda sonora -->
+        <path d="M3 20H10L13 15L17 26L21 11L25 25L28 17L31 20H37" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+
+      Earth Jukebox
+    </a>
+    <button id="about-button" class="ej-link-button" type="button">Cómo funciona</button>
+  </header>
+
+  <canvas id="starfield" class="starfield" aria-hidden="true"></canvas>
+  <canvas id="globe-canvas" class="globe-canvas" aria-hidden="true"></canvas>
+  <div class="landing__veil" aria-hidden="true"></div>
+
+  <main class="landing__content ">
+    <p class="landing__eyebrow">Experiencia interactiva · Space Apps 2026</p>
+    <h1 class="landing__title">Earth Jukebox</h1>
+    <p class="landing__tagline">Escucha nuestro planeta. <br />
+      Explora los datos de la Tierra y transforma sus señales en sonido.
+    </p>
+    <a id="enter-button" class="btn btn-ej btn-lg" href="explorer.html">
+      Explorar la Tierra <span class="btn-ej__arrow" aria-hidden="true">→</span>
+    </a>
+    <ul class="landing__pillars" aria-label="Qué puedes hacer">
+      <li>Observa</li>
+      <li>Explora</li>
+      <li>Escucha</li>
+    </ul>
+  </main>
+
+  <footer class="landing__footer">
+    NASA Space Apps Challenge 2026.
+  </footer>
+
+  <dialog id="about-dialog" class="ej-dialog" aria-labelledby="about-title">
+    <div class="ej-dialog__body">
+      <h2 id="about-title" class="ej-dialog__title">Cómo funciona</h2>
+
+      <ol class="ej-steps">
+        <li>
+          <div>
+            <strong>Ver</strong>
+            Observaciones de la Tierra representadas sobre un globo 3D.
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>Explorar</strong>
+            Gira el planeta y activa capas para descubrir cómo cambian.
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>Escuchar</strong>
+            Cada variable se traduce en sonido: tono, ritmo y volumen siguen a los datos.
+          </div>
+        </li>
+      </ol>
+
+      <p class="ej-dialog__note">
+        Prototipo en desarrollo para NASA Space Apps Challenge 2026. No es un producto oficial de NASA.
+      </p>
+
+      <form method="dialog">
+        <button class="btn btn-ej" type="submit">Cerrar</button>
+      </form>
+    </div>
+  </dialog>
+
+  <script type="module" src="js/pages/landing.js"></script>
+</body>
+
+</html>

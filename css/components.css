@@ -1,0 +1,138 @@
+.btn-ej {
+    --bs-btn-color: var(--ej-text);
+    --bs-btn-bg: rgba(64, 157, 255, 0.15);
+    --bs-btn-border-color: var(--ej-accent);
+    --bs-btn-hover-color: var(--ej-bg-deep);
+    --bs-btn-hover-bg: var(--ej-accent-strong);
+    --bs-btn-hover-border-color: var(--ej-accent-strong);
+    --bs-btn-active-color: var(--ej-bg-deep);
+    --bs-btn-active-bg: var(--ej-accent-strong);
+    --bs-btn-active-border-color: var(--ej-accent-strong);
+    --bs-btn-border-radius: var(--ej-radius-pill);
+    --bs-btn-padding-x: 2rem;
+    --bs-btn-padding-y: 0.75rem;
+  
+    letter-spacing: 0.04em;
+    backdrop-filter: blur(4px);
+    transition:
+      background-color var(--ej-transition),
+      color var(--ej-transition),
+      box-shadow var(--ej-transition);
+  }
+  
+  .btn-ej:hover {
+    box-shadow: 0 0 24px rgba(98, 200, 255, 0.45);
+  }
+  
+  .ej-panel {
+    background: rgba(21, 36, 61, 0.88);
+    border: 1px solid var(--ej-border);
+    border-radius: var(--ej-radius-md);
+    padding: var(--ej-space-md);
+    box-shadow: var(--ej-shadow-panel);
+  }
+  
+  .ej-panel__title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: var(--ej-space-md);
+  }
+  
+  .ej-panel__note {
+    margin: var(--ej-space-md) 0 0;
+    font-size: 0.8rem;
+    color: var(--ej-text-muted);
+  }
+  
+  .form-check-input:checked {
+    background-color: var(--ej-accent);
+    border-color: var(--ej-accent);
+  }
+  
+  .btn-ej__arrow {
+    display: inline-block;
+    margin-left: 0.5rem;
+    transition: transform var(--ej-transition);
+  }
+  
+  .btn-ej:hover .btn-ej__arrow {
+    transform: translateX(4px);
+  }
+  
+  .ej-link-button {
+    padding: 0.5rem 0.25rem;
+    border: 0;
+    background: none;
+    color: var(--ej-text-muted);
+    font-size: 0.875rem;
+    letter-spacing: 0.04em;
+    transition: color var(--ej-transition);
+  }
+  
+  .ej-link-button:hover {
+    color: var(--ej-text);
+  }
+  
+  .ej-dialog {
+    width: min(34rem, calc(100% - 2rem));
+    padding: 0;
+    color: var(--ej-text);
+    background: rgba(14, 26, 46, 0.97);
+    border: 1px solid var(--ej-border);
+    border-radius: 1rem;
+    box-shadow: var(--ej-shadow-panel);
+  }
+  
+  .ej-dialog::backdrop {
+    background: rgba(5, 9, 18, 0.78);
+  }
+  
+  .ej-dialog[open] {
+    animation: ej-fade-up 360ms var(--ej-ease-out);
+  }
+  
+  .ej-dialog__body {
+    padding: 2rem;
+  }
+  
+  .ej-dialog__title {
+    margin-bottom: var(--ej-space-lg);
+    font-size: 1.5rem;
+  }
+  
+  .ej-dialog__note {
+    margin: var(--ej-space-lg) 0 var(--ej-space-md);
+    font-size: 0.8rem;
+    color: var(--ej-text-muted);
+  }
+  
+  .ej-steps {
+    display: grid;
+    gap: var(--ej-space-md);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+  }
+  
+  .ej-steps li {
+    display: grid;
+    grid-template-columns: 2rem 1fr;
+    gap: 0.75rem;
+    color: var(--ej-text-muted);
+    counter-increment: step;
+  }
+  
+  .ej-steps li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: var(--ej-font-display);
+    font-weight: 400;
+    color: var(--ej-accent-strong);
+  }
+  
+  .ej-steps strong {
+    display: block;
+    margin-bottom: 0.15rem;
+    font-weight: 600;
+    color: var(--ej-text);
+  }
