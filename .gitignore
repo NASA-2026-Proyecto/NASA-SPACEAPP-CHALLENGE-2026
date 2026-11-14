@@ -28,3 +28,8 @@ desktop.ini
 # --- Tool inputs that are too large for the repo -------------------------------
 # Source image for tools/make-night-tiles.py
 *.tif
+
+# --- Data pipeline (backend/tools) ----------------------------------------------
+# Intermediate downloads and outputs of the GEOS-FP scripts
+data/raw/
+data/processed/
