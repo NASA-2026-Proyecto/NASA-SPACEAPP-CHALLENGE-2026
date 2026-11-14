@@ -1,0 +1,33 @@
+[project]
+name = "earth-jukebox-api"
+version = "0.1.0"
+description = "Earth Jukebox API: Earth observation data prepared for sonification (NASA Space Apps 2026)."
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.162.7",
+    "pydantic-settings>=2.16.3",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[tool.uv]
+# Aplicación, no librería: el código se ejecuta desde backend/ y no se instala como paquete
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, pyupgrade, bugbear, simplify
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]
