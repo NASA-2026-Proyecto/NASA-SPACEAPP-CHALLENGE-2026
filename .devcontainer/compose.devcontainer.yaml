@@ -1,0 +1,8 @@
+# Solo para el devcontainer: se suma a compose.yaml + compose.dev.yaml.
+# VS Code reenvía los puertos (forwardPorts en devcontainer.json), así que aquí no se
+# publican en el host: no chocan con otro "docker compose up" y funciona igual en remoto.
+services:
+  backend:
+    ports: !reset []
+  frontend:
+    ports: !reset []

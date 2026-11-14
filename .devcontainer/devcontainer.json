@@ -1,0 +1,47 @@
+// Devcontainer de Earth Jukebox: VS Code se conecta al backend y Compose levanta también el front.
+//   - backend:  imagen "dev" (uv, venv en /opt/venv). Sin uvicorn automático: se arranca con F5.
+//   - frontend: nginx sirviendo frontend/ desde el disco y reenviando /api/* al backend.
+// Referencia: https://containers.dev/implementors/json_reference
+{
+  "name": "Earth Jukebox",
+  "dockerComposeFile": ["../compose.yaml", "../compose.dev.yaml", "compose.devcontainer.yaml"],
+  "service": "backend",
+  "runServices": ["backend", "frontend"],
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "vscode",
+
+  // Con Compose el valor por defecto es false: así el contenedor solo espera y el
+  // servidor lo arranca el depurador (F5), sin pelear por el puerto 8000.
+  "overrideCommand": true,
+
+  "forwardPorts": ["frontend:8080", 8000],
+  "portsAttributes": {
+    "8000": { "label": "API (uvicorn)", "onAutoForward": "silent" },
+    "8080": { "label": "Earth Jukebox (nginx)", "onAutoForward": "notify" }
+  },
+
+  "postCreateCommand": {
+    // En Windows los ficheros montados no pertenecen al usuario del contenedor
+    "git": "git config --global --add safe.directory ${containerWorkspaceFolder}",
+    // Por si uv.lock cambió después de construir la imagen
+    "deps": "cd backend && uv sync --locked"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-python.debugpy", "charliermarsh.ruff"],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.cwd": "${containerWorkspaceFolder}/backend",
+        "python.testing.pytestArgs": ["tests"],
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": { "source.organizeImports": "explicit" }
+        }
+      }
+    }
+  }
+}

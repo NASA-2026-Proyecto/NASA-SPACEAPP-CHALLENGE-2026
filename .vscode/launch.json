@@ -1,0 +1,44 @@
+{
+  // F5 con "API: FastAPI" arranca uvicorn bajo el depurador dentro del devcontainer.
+  // nginx (servicio frontend) reenvía /api/* a este proceso: http://localhost:8080
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API: FastAPI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      // 0.0.0.0 para que nginx (otro contenedor) llegue al proceso; --reload-dir: solo el código
+      "args": ["app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "app"],
+      "cwd": "${workspaceFolder}/backend",
+      "env": { "WATCHFILES_FORCE_POLLING": "true" },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "API: tests (pytest)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-q"],
+      "cwd": "${workspaceFolder}/backend",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      // Depura el JS del front en Chrome; los ficheros los sirve nginx desde frontend/
+      "name": "Frontend: Chrome",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8080/explorer.html",
+      "webRoot": "${workspaceFolder}/frontend"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full stack: API + Chrome",
+      "configurations": ["API: FastAPI", "Frontend: Chrome"],
+      "stopAll": true
+    }
+  ]
+}
