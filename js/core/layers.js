@@ -1,2 +1,2 @@
-export const isGridLayer = (layer) => layer.kind === 'grid';
-export const isLayerAvailable = (layer) => Boolean(layer.source || layer.data);
+export const isSceneLayer = (layer) => layer.kind === 'scene';
+export const isLayerAvailable = (layer) => Boolean(layer.source || layer.sceneId);

@@ -16,6 +16,8 @@ export const store = createStore({
   nightMode: false,
   selectedMarker: null,
   species: initialSpecies,
+  sceneStep:0,
+  scenePlaying: false,
 });
 
 export function setLayerVisible(id, visible) {
@@ -38,4 +40,12 @@ export function setLayerSpecies(id, speciesId) {
   store.setState((state) => ({
     species: { ...state.species, [id]: speciesId },
   }));
+}
+
+export function setSceneStep(step) {
+  store.setState({ sceneStep: step });
+}
+
+export function setScenePlaying(playing) {
+  store.setState({ scenePlaying: playing });
 }
