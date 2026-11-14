@@ -8,6 +8,11 @@ import { reducedMotionQuery } from '../core/motion.js';
 import { addNightLights, syncNight } from './night-lights.js';
 import { addLandDots, DOTS_SOURCE, DOTS_LAYER } from './land-dots.js';
 import { createHoverGlow } from './hover-glow.js';
+import { SCENES } from '../catalog/scenes.js';
+import { isSceneLayer } from '../core/layers.js';
+import { loadScene } from '../data/scene-data.js';
+import { createSeriesLayer } from './series-layer.js';
+
 
 const STYLE = 'https://tiles.openfreemap.org/styles/dark';
 const INITIAL_VIEW = { center: [-30, 25], zoom: 1.6 };
@@ -138,11 +143,26 @@ export async function createGlobeMap({ container }) {
     }
   }
 
+  const seriesLayers = [];
   const sync = (state) => {
     syncLayers(map, state);
     syncAppearance(state);
+    for (const series of seriesLayers) series.sync(state);
   };
   sync(store.getState());
+
+  Promise.all(
+    LAYERS.filter(isSceneLayer).map(async (layer) => {
+      const entry = SCENES.find((scene) => scene.id === layer.sceneId);
+      const scene = await loadScene(entry.dataUrl);
+      seriesLayers.push(
+        createSeriesLayer(map, { layerId: layer.id, scene, species: entry.species, beforeId })
+      );
+    })
+  )
+    .then(() => sync(store.getState()))
+    .catch((error) => console.warn('[mapa] Sin capas de datos:', error));
+
 
   // Puntos de tierra + brillo al pasar el cursor. Si fallan, el mapa sigue funcionando.
   let hoverGlow = null;
@@ -171,6 +191,7 @@ export async function createGlobeMap({ container }) {
       unsubscribe();
       hoverGlow?.destroy();
       stopSpin();
+      seriesLayers.forEach((series) => series.destroy());
       map.remove();
     },
   };
