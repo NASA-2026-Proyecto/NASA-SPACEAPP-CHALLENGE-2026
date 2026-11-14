@@ -1,0 +1,11 @@
+# Solo entran en la imagen pyproject.toml, uv.lock y app/
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+tests/
+Dockerfile
+.dockerignore
+.env
+.env.*
