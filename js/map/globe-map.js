@@ -8,6 +8,8 @@ import { reducedMotionQuery } from '../core/motion.js';
 import { addNightLights, syncNight } from './night-lights.js';
 import { addLandDots, DOTS_SOURCE, DOTS_LAYER } from './land-dots.js';
 import { createHoverGlow } from './hover-glow.js';
+import { isGridLayer } from '../core/layers.js';
+import { addGridLayer, syncGridLayer } from './grid-layer.js';
 
 const STYLE = 'https://tiles.openfreemap.org/styles/dark';
 const INITIAL_VIEW = { center: [-30, 25], zoom: 1.6 };
@@ -89,6 +91,10 @@ function addNasaLayers(map, firstLabelId) {
 
 function syncLayers(map, state) {
   for (const layer of LAYERS) {
+    if (isGridLayer(layer)) {
+      syncGridLayer(map, layer, state);
+      continue;
+    }
     if (!layer.source || !map.getLayer(layer.id)) continue;
     map.setLayoutProperty(layer.id, 'visibility', state.layers[layer.id] ? 'visible' : 'none');
     map.setPaintProperty(layer.id, 'raster-opacity', state.opacity[layer.id]);
@@ -143,6 +149,13 @@ export async function createGlobeMap({ container }) {
     syncAppearance(state);
   };
   sync(store.getState());
+
+  Promise.all(
+    LAYERS.filter(isGridLayer).map((layer) => addGridLayer(map, layer, beforeId))
+  )
+    .then(() => sync(store.getState()))
+    .catch((error) => console.warn('[mapa] Sin capas de datos:', error));
+
 
   // Puntos de tierra + brillo al pasar el cursor. Si fallan, el mapa sigue funcionando.
   let hoverGlow = null;

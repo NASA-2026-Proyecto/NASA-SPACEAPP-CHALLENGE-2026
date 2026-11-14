@@ -599,3 +599,21 @@
     }
   }
   
+
+.ej-species { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ej-species__option {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--species-color) 55%, transparent);
+  background: transparent; color: inherit; font: inherit; font-size: 0.8rem;
+}
+.ej-species__option::before {
+  content: ''; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--species-color);
+}
+.ej-species__option.is-active {
+  border-color: var(--species-color);
+  background: color-mix(in srgb, var(--species-color) 25%, transparent);
+}
+.ej-species__option:focus-visible { outline: 2px solid var(--species-color); outline-offset: 2px; }
+.ej-species__option:disabled { opacity: 0.5; cursor: not-allowed; }
