@@ -10,10 +10,13 @@ const RAMP_SIZE = 256;
 // Escalas con rampa (posición 0..1): por debajo de `clear` es transparente y a partir de
 // `solid` tiene la opacidad máxima. En la logarítmica (un campo continuo, como el PM2.5)
 // el aire limpio deja ver el mapa; en la lineal (datos puntuales, como los incendios)
-// cualquier valor por encima de cero se ve.
+// cualquier valor por encima de cero se ve. `sparse` es para una escala logarítmica cuyo
+// dato solo cubre parte del mapa (la precipitación): se ve desde el extremo bajo de la
+// escala. La especie lo pide en el catálogo con `fade: 'sparse'`.
 const RAMP_FADE = {
   log: { clear: 0.08, solid: 0.45 },
   linear: { clear: 0.01, solid: 0.12 },
+  sparse: { clear: 0, solid: 0.2 },
 };
 
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -107,6 +110,7 @@ export function createSeriesLayer(map, { id, layerId, scene, species, beforeId }
   const resample = createResampler(scene, lats, lons);
   const field = new Float32Array(width * height);
   const palette = buildPalette(species);
+  const fades = new Map(species.map((item) => [item.id, item.fade]));
   const rampTables = new Map();
 
   // Pasos ya pintados de la especie que se está viendo: índice de paso -> lienzo
@@ -174,7 +178,7 @@ export function createSeriesLayer(map, { id, layerId, scene, species, beforeId }
     const isLog = scale.kind === 'log';
     const start = isLog ? Math.log(scale.min) : scale.min;
     const span = (isLog ? Math.log(scale.max) : scale.max) - start;
-    const { clear, solid } = RAMP_FADE[scale.kind];
+    const { clear, solid } = RAMP_FADE[fades.get(id) ?? scale.kind];
     const data = image.data;
     for (let r = 0; r < height; r += 1) {
       for (let c = 0; c < width; c += 1) {

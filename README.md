@@ -26,9 +26,10 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 | The aerosol layer is animated: it loops through the last 21 hours of data, with a pause button | ✅ Working |
 | Click on the globe → PM2.5 at that point (EIC visualization), aerosol composition and trend over the last 21 hours (GEOS-FP) | ✅ Working |
 | Sonification of the clicked point: PM2.5 sets pitch and level, composition sets the timbre, the trend plays a short cue | ✅ Working (a simulated signal plays until a point is selected) |
-| API: `/api/health` and `/api/scenes` (`pm25-latest`, `aerosol-latest`, `fires-latest`), with a typed, documented contract | ✅ Working |
+| API: `/api/health` and `/api/scenes` (`pm25-latest`, `aerosol-latest`, `fires-latest`, `precipitation-latest`), with a typed, documented contract | ✅ Working |
 | Fires layer: the EIC daily visualization *Active Fires As Observed by VIIRS*, decoded into fire radiative power (MW) and animated day by day over the last week | ✅ Working |
-| Fires in the point card and in the sound; precipitation layer | 🔜 Pending |
+| Precipitation layer: the EIC visualization *Near Real-Time Global Precipitation* (GPM IMERG), decoded into rain and snow rates (mm/h) and animated over the last 21 hours | ✅ Working |
+| Fires and precipitation in the point card and in the sound | 🔜 Pending |
 
 ## Architecture
 
@@ -158,7 +159,7 @@ curl http://localhost:8080/api/health
 # {"status":"ok","version":"0.1.0"}
 
 curl http://localhost:8080/api/scenes
-# {"scenes":["aerosol-latest","fires-latest","pm25-latest"]}
+# {"scenes":["aerosol-latest","fires-latest","pm25-latest","precipitation-latest"]}
 
 curl http://localhost:8080/api/scenes/aerosol-latest/manifest.json
 # The latest aerosol scene: time stamps, grid and one file per aerosol type.
@@ -238,4 +239,5 @@ The app is currently run locally. Because the frontend only calls relative `/api
 - [OpenFreeMap](https://openfreemap.org/), [OpenMapTiles](https://openmaptiles.org/) and [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors: map labels and boundaries
 - [MapLibre GL JS](https://maplibre.org/), [Three.js](https://threejs.org/), [Bootstrap](https://getbootstrap.com/), [FastAPI](https://fastapi.tiangolo.com/)
 - [NASA Scientific Visualization Studio](https://svs.gsfc.nasa.gov/5113/): the Earth Information Center daily visualization *Active Fires As Observed by VIIRS*
+- [NASA Scientific Visualization Studio](https://svs.gsfc.nasa.gov/4285/): the Earth Information Center visualization *Near Real-Time Global Precipitation from the Global Precipitation Measurement Constellation* (IMERG)
 - Planned: live VIIRS fire detections ([NASA GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api), [FIRMS](https://firms.modaps.eosdis.nasa.gov/))

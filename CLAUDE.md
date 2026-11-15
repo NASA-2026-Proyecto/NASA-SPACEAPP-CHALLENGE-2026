@@ -30,15 +30,15 @@ frontend/                 Static site = nginx web root (relative paths everywher
   css/                    tokens.css (design tokens), base, components, landing, explorer, explorer-shell (panels, point card)
   js/
     config.js             Layer catalog (LAYERS): id, label, icon, ramp, defaultOpacity. `kind: 'scene'` + `scenes` = data scenes
-                          (species = the buttons, each tagged with its sceneId; the first is the default). `source` = GIBS raster. Neither = "Pendiente"
-    catalog/scenes.js     Scene catalog (SCENES): id, dataUrl (the API), source and stampLabel (shown in the panel), species (id, label, color)
+                          (species = the buttons, each tagged with its sceneId; the first is the default). No scenes = "Pendiente"
+    catalog/scenes.js     Scene catalog (SCENES): id, dataUrl (the API), source and stampLabel (shown in the panel), species (id, label, color, optional `fade: 'sparse'`)
     core/layers.js        isSceneLayer(), isLayerAvailable(), sceneIdOf()
     data/scene-data.js    loadScene(baseUrl) (manifest + .f32, checks size and sha256), cellValueAt() (exact cell), sampleAt() (interpolated; not used yet), createResampler()
     data/scene-cache.js   getScene(sceneId): one shared download per scene; failures are not cached
     data/point-reading.js readPm25(), readAerosols(), levelOf(): the reading of a clicked point
     pages/                Page entry points (landing.js, explorer.js); explorer.js wires the panels, the click → reading flow and the point card
     map/                  globe-map.js (createGlobeMap → {map, flyTo, isOnGlobe, showMarker, hideMarker, destroy}), series-layer.js (scene → canvases → raster layer),
-                          scene-animation.js (loop clock), gibs.js, night-lights.js, land-dots.js, hover-glow.js, auto-spin.js
+                          scene-animation.js (loop clock), night-lights.js, land-dots.js, hover-glow.js, auto-spin.js
     ui/                   layer-panel, player (audio UI), waveform, point-card, mode-toggle, dialog, icons, globe-status
     audio/                audio-engine.js (Web Audio: pitch/level from a value, one voice per aerosol species, trend cue), simulated-source.js
     state/                store.js (tiny pub/sub store), app-store.js
@@ -59,17 +59,18 @@ backend/                  uv project (package = false: an app, run from backend/
   app/services/scenes.py  Scene, SceneSource protocol, SceneStore; the manifest builders (build_manifest, encode_species, grid_block, whole_globe_grid, time_axis)
   app/services/geosfp.py  GEOS-FP OPeNDAP client (urllib + numpy): parse_das, parse_dods, GeosFpClient
   app/services/svs.py     SVS client: parse_page (`/api/{id}` JSON), parse_frame_listing, SvsClient
-  app/services/colour_scale.py   Colour → value on images: read a colour bar, invert it, reject thin lines, drop islands, downsample, max_pool, fill small gaps
+  app/services/colour_scale.py   Colour → value on images: read a colour bar (continuous, or stepped with `classes_from_colour_bar`), invert it, reject thin lines, drop islands, downsample, max_pool, fill small gaps
   app/services/exr.py     read_rgb(bytes): OpenEXR frame → linear float32 RGB
   app/services/aerosol_scene.py  AerosolSource → `aerosol-latest` (GEOS-FP, 5 species)
   app/services/pm25_scene.py     Pm25Source → `pm25-latest` (EIC daily visualization SVS 5151)
   app/services/fire_scene.py     FireSource → `fires-latest` (EIC daily visualization SVS 5113)
+  app/services/precipitation_scene.py  PrecipitationSource → `precipitation-latest` (EIC visualization SVS 4285, rain and snow)
   geosfp/                 OFFLINE pipeline library (xarray + pydap; needs `--group pipeline`): client (remote access with chunked, retried loads),
                           episode (download to NetCDF), timeline (GrADS time axis, pure), stats (per-step statistics and CSV, pure),
                           validation, grid (grid description, reuses app.services.scenes), cli (argparse helpers)
   tools/                  OFFLINE command-line scripts: find_episode, summarize_episode, download_global_episode, build_scene
-  tests/                  pytest. conftest (isolated settings, fixtures), fakes.py / fake_svs.py / fake_fires.py (fake NASA), fixtures/ (real NASA responses),
-                          test_app, test_http, test_scene_store, test_scenes (aerosol), test_pm25_scene, test_fire_scene, test_format_changes,
+  tests/                  pytest. conftest (isolated settings, fixtures), fakes.py / fake_svs.py / fake_fires.py / fake_precipitation.py (fake NASA), fixtures/ (real NASA responses),
+                          test_app, test_http, test_scene_store, test_scenes (aerosol), test_pm25_scene, test_fire_scene, test_precipitation_scene, test_format_changes,
                           test_real_responses, test_pipeline_* (offline pipeline)
   pyproject.toml  uv.lock  .python-version (3.13)  Dockerfile  .dockerignore
 tools/make-night-tiles.py PEP 723 script: `uv run tools/make-night-tiles.py <earth_nightlights_10K.tif>` → frontend/assets/tiles/nightlights
@@ -101,7 +102,7 @@ Dependency direction is one way: `main → factory → api → services → sche
 | HTTP routes | `api/health.py`, `api/scenes.py` | Translate requests to store calls; no logic |
 | Contract | `schemas.py` | Pydantic models of every response, including the scene manifest |
 | Scene machinery | `services/scenes.py` | `SceneSource` protocol, `SceneStore`, and the only functions that build manifests |
-| Scene sources | `services/aerosol_scene.py`, `pm25_scene.py`, `fire_scene.py` | One class per scene: `check()` and `build()` |
+| Scene sources | `services/aerosol_scene.py`, `pm25_scene.py`, `fire_scene.py`, `precipitation_scene.py` | One class per scene: `check()` and `build()` |
 | NASA clients | `services/geosfp.py`, `services/svs.py`, `services/http.py` | Fetch and parse; injected `get` functions so tests never use the network |
 | Image decoding | `services/colour_scale.py`, `services/exr.py` | Pure numpy/Pillow/OpenEXR functions |
 
@@ -114,11 +115,12 @@ A **scene** is how gridded data reaches the browser, whatever its source. The fo
 - `manifest.json` (`schema_version: 2`, `kind: "grid-series"`): `scene_id`, `version`, `generated_utc`, `layer`, `provenance` (free-form text, numbers and URL lists), `time` (`steps`, `step_minutes`, `stamps_utc`, `note`), `grid` (`lat_min`, `lat_step`, `lon_min`, `lon_step`, `n_lat`, `n_lon`, `lon_periodic`, …) and per species `file`, `sha256`, `min`, `max`, `unit`, `display_scale_max` and optionally `scale: {kind: "log" | "linear", min, max, ramp}` and `missing`. Optional fields are omitted when empty (`response_model_exclude_none`).
 - One `.f32` per species: float32 little-endian, order `[step][lat][lon]`, south to north, west to east. Its URL is `…/{scene_id}/{version}/{species}.f32`: the version is in the path, so files are immutable and cacheable.
 
-The three scenes, all built at runtime (`factory.default_scenes()`), each with `SCENE_STEPS` steps (default 8):
+The four scenes, all built at runtime (`factory.default_scenes()`), each with `SCENE_STEPS` steps (default 8):
 
 - **`pm25-latest`, the field** (how much, everywhere): the EIC daily visualization PM2.5 (SVS 5151, GEOS-CF model). NASA re-renders 372 hourly frames once a day; the source takes one frame out of every 3, ending at the newest, so 8 steps cover 21 hours. Colours are converted back to µg/m³ with the page's own colour bar (log scale 0.4–409.6, constants in `pm25_scene.py`), coastlines and borders are removed by shape (bright features under 3 px) and filled from neighbours, 4 × 4 pixel blocks are averaged on the log scale to a 512 × 256 grid, and the logo and date boxes stay NaN. The last stamp is NASA's publication time: the spacing between steps is exact, the absolute hour is not, because each frame's own hour is only printed on the image. The manifest carries NASA's ramp colours so the frontend paints with them.
 - **`aerosol-latest`, the probe source** (what it is made of, where it is going): GEOS-FP optical depth for 5 species (`SPECIES` in `aerosol_scene.py`), the last 8 three-hourly steps on a 1° × 1.25° global grid (one `.dods` request per species, 1 cell out of 4). Colour scales are fixed constants so colours stay comparable between updates.
 - **`fires-latest`**: the EIC daily visualization of VIIRS active fires (SVS 5113), species `frp` in MW. It uses the equirectangular "SoaS" frames (EXR, 4096 × 2048, about 6.5 MB each, one per day; each shows a 5-day moving window). `frp_from_rgb()` maps the linear red channel to fire radiative power with the colour bar read once from the frame legend (constants in `fire_scene.py`; background red ≤ 0.02, fires > 0.2); each cell keeps the strongest fire of its 8 × 8 pixel block (512 × 256 grid, linear scale 0–8 MW). **The newest frames arrive empty or half-filled**, so the source downloads `steps + 5` frames and `frames_with_data()` drops trailing ones with fewer than 0.6× the median fire-pixel count (on 15 Nov 2026 it skipped 4 and used 2–9 Nov). The version is the `Last-Modified` of the newest frame (a HEAD request), because the page's `update_date` does not change with the daily render. Frame dates are inferred: newest published frame = render date − 1 day, one frame per day. Each rebuild downloads about 85 MB from NASA, once a day.
+- **`precipitation-latest`**: the EIC visualization of near-real-time precipitation (SVS 4285, IMERG from the GPM satellites), species `rain` and `snow` in mm/h. It uses the "flatalpha" frames (PNG, 3600 × 1800, transparent background, no labels, about 0.55 MB each, one every 30 minutes). The source takes one frame out of every 6, ending at the newest, so 8 steps cover 21 hours; **stamps are exact**, read from the file names. Colours are discrete classes, not a gradient: each pixel must match exactly one colour of the page's two colour bars (read at build time; an unknown colour fails the build), and each class counts as the geometric midpoint of its interval (class edges `EDGES` in `precipitation_scene.py`, 0.1–50 mm/h; rain also has an "above 50" class, worth 50). So values are class-level, not continuous. 5 × 5 pixel blocks are averaged to a 720 × 360 grid (0.5°), zero where it is dry. The manifest ramp has 33 stops spread evenly on the log scale, each with the colour of its class, because the class edges are unevenly spaced. The version is the time of the newest frame, so the scene rebuilds whenever NASA adds frames (about hourly, in pairs); a rebuild downloads about 4.5 MB.
 
 ### Scene store (`services/scenes.py`)
 
@@ -126,12 +128,12 @@ The three scenes, all built at runtime (`factory.default_scenes()`), each with `
 - A refresh calls `source.check()` (cheap) and only calls `source.build()` when the version changed. Only one refresh runs at a time (`_claim` / `_release` under a lock, released in `finally`). `refresh()` is the blocking variant, used by tests.
 - The store keeps the previous scene too, so a browser holding the old manifest can still download its files.
 - `clock` and `spawn` are injectable for tests. `error` holds the last failure for diagnostics and logs; the 503 response sent to clients has a fixed message and does not expose it.
-- Scenes live in process memory: about 4 MB (pm25), 8 MB (aerosol), 4 MB (fires), doubled while the previous version is kept. Building peaks at about 105 MB per PM2.5 frame and about 235 MB per fire frame (measured), one frame at a time.
+- Scenes live in process memory: about 4 MB (pm25), 8 MB (aerosol), 4 MB (fires), 17 MB (precipitation), doubled while the previous version is kept. Building peaks at about 105 MB per PM2.5 frame and about 235 MB per fire frame and about 105 MB per precipitation frame (measured), one frame at a time.
 
 ### Frontend: layers, animation, click and sound
 
-- **Layers.** Each layer of `config.js` with `kind: 'scene'` has a collapsible "Tipo" selector (a full-width row under the layer; closed by default, shows the current species) with one radio button per species across its scenes; arrow keys move the selection. Aerosoles: "EIC PM 2.5" (first, default, from `pm25-latest`) and the five GEOS-FP species (from `aerosol-latest`). Incendios: "EIC Incendios". A scene is fetched the first time one of its species is selected with the layer on (`globe-map.js loadScenesOnDemand`, retry every 5 s on any error), and each scene gets its own map layer (`<layer>-<sceneId>`). The panel note shows the source and date of what is on screen (`sceneInfo` in the store).
-- **Drawing.** `series-layer.js` paints each step once into its own canvas, re-projected to Web Mercator: with the manifest's ramp when there is one (log: transparent in clean air; linear: any value above zero shows), else with a single colour per species whose opacity grows with the value. It cross-fades the two neighbouring steps with canvas compositing (`lighter` with weights).
+- **Layers.** Each layer of `config.js` with `kind: 'scene'` has a collapsible "Tipo" selector (a full-width row under the layer; closed by default, shows the current species) with one radio button per species across its scenes; arrow keys move the selection. Aerosoles: "EIC PM 2.5" (first, default, from `pm25-latest`) and the five GEOS-FP species (from `aerosol-latest`). Incendios: "EIC Incendios". Precipitación: "Lluvia" (default) and "Nieve", one at a time. A scene is fetched the first time one of its species is selected with the layer on (`globe-map.js loadScenesOnDemand`, retry every 5 s on any error), and each scene gets its own map layer (`<layer>-<sceneId>`). The panel note shows the source and date of what is on screen (`sceneInfo` in the store).
+- **Drawing.** `series-layer.js` paints each step once into its own canvas, re-projected to Web Mercator: with the manifest's ramp when there is one (log: transparent in clean air; linear: any value above zero shows; a species with `fade: 'sparse'` in the catalog, as rain and snow, shows from the low end of its log scale), else with a single colour per species whose opacity grows with the value. It cross-fades the two neighbouring steps with canvas compositing (`lighter` with weights).
 - **Animation.** `scene-animation.js` loops 0 → 1 in 9 s, holds 2.2 s on the newest step and restarts (20 fps). `globe-map.js` runs it while `state.scenePlaying` is true and a scene layer is visible, calling `series.setProgress(p)` directly; the store only gets `sceneProgress` in 24 coarse ticks for the panel label ("Últimas 21 h · 8 h antes", or in days for fires). Pausing returns to the newest step. `scenePlaying` starts false when the user prefers reduced motion.
 - **Click → reading.** `explorer.js initPointProbe`: ignores clicks off the globe (`globe.isOnGlobe`), wraps and rounds the coordinates, builds a reading (`data/point-reading.js`) and fills it from `getScene('pm25-latest')` and `getScene('aerosol-latest')` independently, with no server round trip per click. The card (`ui/point-card.js`, `textContent` only) sits in a fixed panel in the bottom-right corner (`.ej-point-dock`) and the point gets a `maplibregl.Marker`. Card and sound always describe the newest step; the trend covers all the steps of the scene (21 hours).
 - **Roles are fixed:** PM2.5 from the EIC visualization says **how much** (µg/m³, plus a level word from its position on NASA's log scale: relative to that scale, not an air-quality index); GEOS-FP says **what it is made of** (share of each species' optical depth at the newest step) and **where it is going** (change of the 5-species total; beyond ±10% is "en aumento"/"en descenso"). Never drive the same visual or sound property from two sources.
@@ -151,7 +153,7 @@ uv run pytest --cov            # coverage of app/ with branches; fails under 95%
 
 - Docstrings are required on every public module, class, function and method (`D107` is ignored: `__init__` arguments are documented in its own docstring when they need explaining). Tests are exempt from `D` and `ANN`: the test name says what is checked.
 - Type hints: no bare `dict`/`list`/`tuple`, no untyped parameters; `Any` only at the edges (parsed JSON, `SceneStore[Any]` in the app's registry).
-- Tests never touch the network. `tests/conftest.make_settings()` builds settings that ignore the host environment. NASA is replaced by fakes with injected `get` functions; `tests/fixtures/` has real responses (GEOS-FP `.das`, SVS pages 5151 and 5113) so a format change at NASA fails a test. `test_format_changes.py` covers every "NASA changed something" error branch: none may publish a wrongly decoded scene.
+- Tests never touch the network. `tests/conftest.make_settings()` builds settings that ignore the host environment. NASA is replaced by fakes with injected `get` functions; `tests/fixtures/` has real responses (GEOS-FP `.das`, SVS pages 5151, 5113 and 4285, the 4285 frame listing and its two colour bars) so a format change at NASA fails a test. `test_format_changes.py` covers every "NASA changed something" error branch: none may publish a wrongly decoded scene.
 - mypy covers `app/` only. `geosfp/` and `tools/` are linted and tested but not type-checked (xarray and pydap are not installed by default) and are outside the coverage figure.
 
 ## Offline pipeline (`backend/geosfp`, `backend/tools`)
@@ -220,9 +222,11 @@ When waiting for a service, use `curl -sf`: without `-f`, a 502 counts as succes
 
 - **One instance only.** Scenes are per process, so replicas would not agree during an update and a serverless host would rebuild from NASA on every cold start. Lifting this needs the built scenes stored outside the process (disk or object storage).
 - **NASA is a runtime dependency.** If its servers are down when the backend starts, the affected layer stays empty until they recover: there is no on-disk copy of the last scene.
-- **Data age:** GEOS-FP "assim" runs about 12 hours behind real time; the PM2.5 loop only changes once a day; the newest usable fire frame is several days old.
-- **The PM2.5 scale ends (0.4 and 409.6 µg/m³) and the fire colour bar are constants.** If NASA rescales either legend, values would be wrong without any error. Nothing checks them against the page.
-- `SCENE_STEPS` applies to all three scenes at once.
+- **Data age:** GEOS-FP "assim" runs about 12 hours behind real time; the PM2.5 loop only changes once a day; the newest usable fire frame is several days old; precipitation is about 5 hours old.
+- **The PM2.5 scale ends (0.4 and 409.6 µg/m³) and the fire colour bar are constants.** If NASA rescales either legend, values would be wrong without any error. Nothing checks them against the page. The same holds for the precipitation class edges (the colours are read from the page; the numbers on the marks are not).
+- **Precipitation needs every frame of its series.** If NASA's listing lacks one of the 8 frames (3 hours apart), the rebuild fails and the last good scene keeps being served until the gap moves out of the window.
+- **Rain and snow cannot be seen together**: they are two species of one layer, and a layer paints one species at a time.
+- `SCENE_STEPS` applies to all four scenes at once.
 - The CI workflow has never run: it was written locally and its action versions (`actions/checkout@v4`, `astral-sh/setup-uv@v5`) are unverified.
 - `SCENE_STEPS` and `SCENE_WARMUP` are not in `.env.example` (Claude cannot edit it); Compose has defaults for both.
 - `tools/make-night-tiles.py` (repo root) is outside ruff's scope and runs at import.
@@ -236,9 +240,9 @@ Agreed to leave for later (from the independent review of 15 Nov 2026); do not s
 - **No frontend tests, linter or formatter.** Mixed quote styles and indentation between files. First candidates for unit tests: `data/scene-data.js`, `data/point-reading.js`, the pure parts of `map/series-layer.js`, `data/scene-cache.js`, `state/store.js`.
 - **Large closure functions** (114–187 lines) in `series-layer.js`, `globe-map.js`, `dotted-globe.js`, `layer-panel.js`, `audio-engine.js`, `waveform.js`, `player.js`; `globe-map.js` also owns scene loading, retries (forever, every 5 s) and the animation wiring.
 - **Duplicated helpers:** date, percent and trend formatting in `layer-panel.js`, `point-card.js` and `player.js`; the land mask in `map/land-dots.js` and `effects/globe/land-mask.js`. Species ids are written in `aerosol_scene.py`, `catalog/scenes.js` and `audio-engine.js` with nothing checking they agree.
-- **Not yet removed:** `sampleAt()` (kept for a spatial sweep in sound), the GIBS raster path (`gibs.js`, `addNasaLayers`: no layer has a `source` today; the rain layer would use it), `title`/`reference` in the scene catalog (not shown), unused CSS selectors in `explorer.css`, `components.css`, `base.css` and `explorer-shell.css`, and the "PENDIENTE" note in `explorer.html`.
+- **Not yet removed:** `sampleAt()` (kept for a spatial sweep in sound), `title`/`reference` in the scene catalog (not shown), unused CSS selectors in `explorer.css`, `components.css`, `base.css` and `explorer-shell.css`, and the "PENDIENTE" note in `explorer.html`.
 - MapLibre is a static import from a CDN: if it is unreachable the page fails without a message. Scene fetches have no timeout and the scene cache is never invalidated, so a tab left open never shows newer data.
-- Fires are on the globe only: not in the point card or the sound. Sound has no spatial sweep and does not start by itself on click.
+- Fires and precipitation are on the globe only: not in the point card or the sound. Sound has no spatial sweep and does not start by itself on click.
 
 ## Verified NASA facts (probed 14-15 Nov 2026)
 
@@ -247,9 +251,10 @@ More detail and evidence live in the sibling exploration repo `D:\nasa-sonificat
 - **GEOS-FP OPeNDAP** (`https://opendap.nccs.nasa.gov/dods/GEOS-5/fp/0.25_deg/assim/tavg3_2d_aer_Nx`, no key): 3-hourly, 0.25° × 0.3125° (721 × 1152). AOD per species: `brexttau`, `bcexttau`, `duexttau`, `ssexttau`, `suexttau`, plus `ocexttau`, `niexttau`, `totexttau`; surface `pm25`. Fill value 1e15. Sometimes answers 502/504.
 - **EIC daily visualization PM2.5 (SVS 5151)**: 372 hourly PNG frames, 2048×1024, equirectangular, re-rendered once a day, from GEOS-CF (not GEOS-FP). Logo, timestamp (US Eastern) and coastlines are burned in. Colour bar is a log ramp 0.4–409.6 µg/m³ (`PM2.5_colorbar_plain.png`). JSON metadata: `https://svs.gsfc.nasa.gov/api/5151`. Against GEOS-FP `pm25` the pattern agrees but GEOS-FP reads 4–6× higher in clean air: never mix their absolute levels.
 - **EIC fires (SVS 5113)**: 900 EXR frames per version (EIC = oval projection with date and legend; SoaS = equirectangular, no labels), linear RGB with display = value^(1/2.2). One frame per day near the end of the sequence; the last 3–4 are empty or partial. `VIIRS_fires_latest.png` is the oval version and cannot be draped on the globe.
+- **EIC precipitation (SVS 4285)**: 380 half-hourly frames (about 8 days), named with their UTC time (`imergert_alpha.2026-11-14T21:30:00Z.png`); the newest is about 5 hours old and complete (7 frames sampled, all with 6–7% of the map covered). Three sets: `flatalpha` (precipitation only, binary alpha), `flatcomposite` (over a map) and `flatdates` (the date label alone). Exactly 21 colours appear: 11 for rain (`rainbarblack2.png`, 10 intervals plus "above 50") and 10 for snow (`snowbarblack2.png`). `imergert_alpha.now.png` is the newest frame. The frame listing also links a `hurricane2022` subfolder.
 - **SVS sends `Access-Control-Allow-Origin` for one unrelated site only**, so the browser cannot load SVS images into MapLibre or a canvas: they must go through the backend.
 - **GIBS** has `VIIRS_NOAA20_Thermal_Anomalies_375m_All` (vector tiles, `GoogleMapsCompatible_Level8`, daily through today, no key). **FIRMS** needs a free MAP_KEY. Neither is used yet.
 
 ## Possible next steps
 
-Not agreed, only candidates: fires in the point card and the sound; live fire numbers near the click (needs a FIRMS key); storing built scenes outside the process; a guard on the legend constants; the deferred frontend work above. The earlier idea of migrating Gabriel's backend from `D:\NASA-Proyecto` (NASA POWER, EONET) was dropped in favour of the scene design.
+Not agreed, only candidates: fires and precipitation in the point card and the sound; live fire numbers near the click (needs a FIRMS key); storing built scenes outside the process; a guard on the legend constants; the deferred frontend work above. The earlier idea of migrating Gabriel's backend from `D:\NASA-Proyecto` (NASA POWER, EONET) was dropped in favour of the scene design.

@@ -75,9 +75,9 @@ def test_explicit_settings_ignore_a_broken_environment(monkeypatch):
 # --- Aplicación por defecto --------------------------------------------------------
 
 
-def test_default_scenes_cover_the_three_sources(settings):
+def test_default_scenes_cover_every_source(settings):
     stores = default_scenes(settings)
-    assert sorted(stores) == ["aerosol-latest", "fires-latest", "pm25-latest"]
+    assert sorted(stores) == ["aerosol-latest", "fires-latest", "pm25-latest", "precipitation-latest"]
     assert all(store.scene_id == scene_id for scene_id, store in stores.items())
 
 
@@ -90,7 +90,12 @@ def test_main_exposes_the_application(monkeypatch):
     try:
         module = importlib.import_module("app.main")
         assert isinstance(module.app, FastAPI)
-        assert module.app.state.scenes.keys() == {"aerosol-latest", "fires-latest", "pm25-latest"}
+        assert module.app.state.scenes.keys() == {
+            "aerosol-latest",
+            "fires-latest",
+            "pm25-latest",
+            "precipitation-latest",
+        }
     finally:
         get_settings.cache_clear()
 

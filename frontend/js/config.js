@@ -5,11 +5,9 @@
 //   icon                  -> nombre de js/ui/icons.js
 //   ramp                  -> colores de la capa, de "poco" a "mucho" (iconos, deslizador)
 //   defaultOpacity        -> opacidad inicial (0-1)
-//   paint                 -> ajustes de color del ráster (hue-rotate, saturation, contrast...)
-//   source                -> origen de los datos (NASA GIBS). SIN "source" la capa aparece
-//                            como "Pendiente"; al añadirlo, se activa sola.
 //   kind: 'scene' + scenes -> la capa dibuja escenas (js/catalog/scenes.js). Cada botón de
 //                            especie pertenece a una escena; el primero es el de por defecto.
+//                            SIN escenas la capa aparece como "Pendiente".
 import { findScene } from './catalog/scenes.js';
 
 // Aerosoles: primero la visualización diaria del EIC (PM2.5) y después las especies del
@@ -17,6 +15,8 @@ import { findScene } from './catalog/scenes.js';
 const AEROSOL_SCENES = ['pm25-latest', 'aerosol-latest'];
 // Incendios: la visualización diaria del EIC (potencia radiativa, VIIRS).
 const FIRE_SCENES = ['fires-latest'];
+// Precipitación: la visualización del EIC (IMERG), con la lluvia y la nieve por separado.
+const RAIN_SCENES = ['precipitation-latest'];
 const speciesOf = (sceneIds) =>
   sceneIds.flatMap((sceneId) =>
     findScene(sceneId).species.map((species) => ({ ...species, sceneId }))
@@ -40,7 +40,10 @@ export const LAYERS = [
     icon: "drops",
     ramp: ["#8be9ff", "#2f8cff", "#1537b8"], // de celeste a azul intenso
     defaultOpacity: 0.85,
-    // source: { layerId: '…', matrixSet: '…', maxZoom: …, format: 'png' },  <- pendiente
+    badge: 'NASA',
+    kind: 'scene',
+    scenes: RAIN_SCENES,
+    species: speciesOf(RAIN_SCENES),
   },
   {
     id: 'aerosol',
