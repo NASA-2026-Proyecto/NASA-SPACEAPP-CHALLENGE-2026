@@ -24,10 +24,15 @@ def cell(lat: float, lon: float) -> tuple[int, int]:
 
 
 def scene_of(scene_id: str, fields: dict[str, np.ndarray], version: str = "20261114T2130Z") -> Scene:
-    """Escena de dos pasos: el más antiguo a cero y el más reciente con `fields` (especie -> malla 2D)."""
-    files, species = {}, {}
-    for key, newest in fields.items():
-        values = np.stack([np.zeros_like(newest), newest]).astype("float32")
+    """Escena con una malla por especie en `fields`.
+
+    Una malla 2D da dos pasos: el más antiguo a cero y el más reciente con ella. Una 3D
+    ([paso, lat, lon]) da sus propios pasos, cada 3 horas hasta `NEWEST`.
+    """
+    files, species, steps = {}, {}, 2
+    for key, given in fields.items():
+        values = (given if given.ndim == 3 else np.stack([np.zeros_like(given), given])).astype("float32")
+        steps = len(values)
         files[f"{key}.f32"], species[key] = encode_species(
             version,
             key,
@@ -42,7 +47,11 @@ def scene_of(scene_id: str, fields: dict[str, np.ndarray], version: str = "20261
         version=version,
         layer="test",
         provenance={},
-        time=time_axis([NEWEST - timedelta(hours=3), NEWEST], step_minutes=180, note="test"),
+        time=time_axis(
+            [NEWEST - timedelta(hours=3 * back) for back in reversed(range(steps))],
+            step_minutes=180,
+            note="test",
+        ),
         grid=whole_globe_grid(N_LAT, N_LON),
         species=species,
     )

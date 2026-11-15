@@ -18,9 +18,11 @@ const wait = (seconds, signal) =>
     });
   });
 
-// Lectura del punto: dato, descripción, parámetros y la ruta del audio (si suena algo)
-export async function fetchSoundReading(soundId, { lat, lon }, signal) {
-  const response = await fetch(`${BASE}/${soundId}?lat=${lat}&lon=${lon}`, { signal });
+// Lectura del punto: dato, descripción, parámetros y la ruta del audio (si suena algo).
+// mode: 'stereo' o 'binaural' (en tres dimensiones, para auriculares). La lectura dice en
+// su propio `mode` cuál se va a oír: es estéreo si el sonido aún no tiene versión 3D.
+export async function fetchSoundReading(soundId, { lat, lon }, mode, signal) {
+  const response = await fetch(`${BASE}/${soundId}?lat=${lat}&lon=${lon}&mode=${mode}`, { signal });
   if (!response.ok) throw httpError(response);
   return response.json();
 }

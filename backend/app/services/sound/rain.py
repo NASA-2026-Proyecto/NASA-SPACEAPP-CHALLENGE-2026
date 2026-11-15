@@ -4,18 +4,27 @@ La misma lluvia, con más o menos gotas: una cortina de incontables impactos dim
 gotas gordas que golpean cerca, la lluvia lejana como un rumor liso, viento a ráfagas y
 truenos en las tormentas. Todo cuelga de un número, `wetness`: 0 en seco y 1 con
 20 mm/h o más, creciendo como log(1 + mm/h).
+
+En tres dimensiones (`synthesize_spatial`) cada celda del entorno aporta la lluvia que
+cae en ella, desde su rumbo y su distancia, y el sonido recorre los pasos de la serie:
+un frente que cruza el mapa cruza también de un oído al otro. El timbre común (lo grave
+de las gotas, el brillo del rumor) es el de la lluvia media que se oye.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 
-from app.services.sound import dsp
+from app.services.sound import dsp, spatial
 from app.services.sound.common import (
     SECONDS,
     TAIL,
     PointSample,
+    Surroundings,
     compass,
+    describe_journey,
+    describe_place,
     describe_stamp,
     direction_weights,
     fade_envelope,
@@ -27,6 +36,13 @@ UNIT = "mm/h"
 RATE_FULL = 20.0  # mm/h a partir de los cuales la lluvia suena con toda su fuerza
 RAINING_FROM = 0.05  # mm/h por debajo de los cuales no cae ninguna gota
 RMS_FULL = 0.20  # RMS de la cortina de lluvia con wetness 1 (la referencia)
+
+# En 3D
+NEAR_KM = 20.0  # hasta esta distancia la lluvia suena junto al oyente (su propia celda)
+SHEET_GAIN = 0.69  # amplitud de cada gota de la cortina: con 20 mm/h en todo el entorno, RMS_FULL
+TAPS_GAIN = 3.8  # amplitud de cada gota gorda: en ese mismo caso, la mitad de RMS_FULL
+DROP_MS = (0.15, 0.35, 0.8)  # lo que tarda en apagarse cada forma de gota de la cortina
+TAPS = ((0.005, 0.7), (0.009, 1.0), (0.013, 1.4))  # gotas gordas: duración (s) y tono respecto a tap_hz
 
 # Categorías de intensidad de lluvia de la American Meteorological Society, en mm/h
 # ("seco" es no llegar a la cantidad con la que aquí empieza a caer alguna gota)
@@ -79,9 +95,15 @@ def category(mm_h: float) -> str:
     return next(name for top, name in CATEGORIES if mm_h < top)
 
 
+def wetness_field(mm_h: Signal) -> Signal:
+    """`wetness` de muchos valores a la vez."""
+    out: Signal = np.clip(np.log1p(np.maximum(mm_h, 0.0)) / np.log1p(RATE_FULL), 0, 1)
+    return out
+
+
 def wetness(mm_h: float) -> float:
     """0 = seco, 1 = 20 mm/h o más; crece como log(1 + mm/h)."""
-    return float(np.clip(np.log1p(max(mm_h, 0.0)) / np.log1p(RATE_FULL), 0, 1))
+    return float(wetness_field(np.asarray(mm_h, dtype=np.float64)))
 
 
 def mapping(mm_h: float) -> RainParameters:
@@ -246,3 +268,125 @@ def synthesize(sample: PointSample, m: RainParameters, seed: int = 0) -> Signal:
     mix = (sheet + taps + wash) * envelope + (wind + thunder) * envelope
     mix = dsp.reverb(mix, rng, seconds=0.6, damping_hz=5000, wet=0.12)
     return dsp.soft_limit(mix)
+
+
+def _distances(around: Surroundings) -> Signal:
+    """A cuántos metros suena cada celda del entorno."""
+    return spatial.metres(around.km, NEAR_KM, around.far_km)
+
+
+def _shares(distance: Signal, power: float) -> Signal:
+    """Qué parte de las gotas aporta cada celda: más cuanto más cerca; suman 1."""
+    out: Signal = distance**-power / np.sum(distance**-power)
+    return out
+
+
+def spatial_mapping(around: Surroundings) -> RainParameters:
+    """Los parámetros de la lluvia media que se oye en el entorno: de ella sale el timbre del conjunto."""
+    heard = _shares(_distances(around), 1) * (around.values >= RAINING_FROM)
+    mean = float(np.sum(wetness_field(around.values) * heard) / max(float(heard.sum()), 1e-12))
+    return mapping(float(np.expm1(mean * np.log1p(RATE_FULL))))
+
+
+def describe_spatial(around: Surroundings, m: RainParameters) -> str:
+    """Dice con palabras qué se oye en tres dimensiones (también para lectores de pantalla)."""
+    newest = around.values[-1]
+    raining = int(np.count_nonzero(newest >= RAINING_FROM))
+    text = (
+        f"{describe_journey(around)} Precipitación medida por los satélites GPM hasta "
+        f"{number(around.far_km, 0)} km del punto: cada celda donde llueve suena desde donde está, "
+        f"con unas {number(m.drops_per_s, 0)} gotas por segundo de media. "
+    )
+    if raining == 0:
+        return text + "En el paso más reciente no llueve en el entorno."
+    wettest = int(newest.argmax())
+    return text + (
+        f"En el paso más reciente llueve en {raining} de las {newest.size} celdas del entorno; donde más, "
+        f"unos {number(float(newest[wettest]))} mm/h ({category(float(newest[wettest]))}), "
+        f"{describe_place(around, wettest)}."
+    )
+
+
+def synthesize_spatial(around: Surroundings, m: RainParameters, seed: int = 0) -> Signal:
+    """Convierte la lluvia del entorno en 15 s de sonido en tres dimensiones, para auriculares."""
+    rng = np.random.default_rng(seed)
+    sr = SAMPLE_RATE
+    n = spatial.N_SAMPLES
+    t = np.arange(n) / sr
+    space = spatial.Space(rng)
+    distance = _distances(around)
+    share = _shares(distance, 1)
+    rains = [[mapping(float(mm_h)) for mm_h in step] for step in around.values]
+
+    def field(pick: Callable[[RainParameters], float]) -> Signal:
+        """Un parámetro de cada celda en cada paso."""
+        return np.array([[pick(cell) for cell in step] for step in rains])
+
+    # Ráfagas: el viento y la lluvia se hinchan a la vez
+    envelope = fade_envelope(n, sr)
+    gust_curve = dsp.to_audio_rate(rng.uniform(0, 1, 14), n)
+    swell = envelope * (1 - m.gustiness * 0.6 * (1 - gust_curve))
+
+    # 1. La cortina: cada celda aporta las gotas de la lluvia que cae en ella
+    drops = spatial.draw_grains(rng, field(lambda cell: cell.drops_per_s) * share)
+    count = drops.seconds.size
+    amps = (np.minimum(rng.pareto(3.0, count), 6) + 0.3) * rng.choice([-1.0, 1.0], count)
+    amps *= SHEET_GAIN * np.interp(drops.seconds, t, swell)
+    shapes = []
+    for tau_ms in DROP_MS:
+        shapes.append(spatial.grain_shape(_click(tau_ms, rng), m.sheet_low_hz, m.sheet_high_hz))
+    space.add_grains(
+        drops.seconds, amps, spatial.grain_bearings(rng, around, drops.cell), distance[drops.cell], shapes
+    )
+
+    # 2. Golpes: gotas gordas, que solo suenan cerca (por eso no hace falta apagarlas)
+    taps = spatial.draw_grains(rng, field(lambda cell: cell.taps_per_s) * _shares(distance, 4))
+    amps = TAPS_GAIN * rng.uniform(0.3, 1.0, taps.seconds.size) ** 2 * np.interp(taps.seconds, t, swell)
+    shapes = []
+    for seconds, tone in TAPS:
+        tt = np.arange(int(6 * seconds * sr)) / sr
+        knock = rng.standard_normal(tt.size) * np.exp(-tt / seconds)
+        shapes.append(spatial.grain_shape(knock, m.tap_hz * tone / 1.6, m.tap_hz * tone * 1.6))
+    space.add_grains(
+        taps.seconds,
+        amps,
+        spatial.grain_bearings(rng, around, taps.cell),
+        distance[taps.cell],
+        shapes,
+        dull_far=False,
+    )
+
+    # 3. El rumor: la lluvia lejana, lisa y más oscura, desde el sector donde llueve
+    wash = field(lambda cell: cell.wash_ratio) * RMS_FULL * 10 ** (field(lambda cell: cell.sheet_db) / 20)
+    space.add_beds(
+        around,
+        share * wash**2,
+        lambda: np.sqrt(2) * spatial.unit_noise(rng, 0.8, 200, m.wash_hz),
+        swell,
+    )
+
+    # 4. Truenos: retumbos graves desde donde más llueve en ese momento, solo en las tormentas
+    thunders = field(lambda cell: float(cell.thunder))
+    for start_s in np.sort(rng.uniform(1.0, SECONDS - 4.5, int(thunders.max()))):
+        step = round(float(spatial.position(np.array([start_s]), len(rains))[0]))
+        cell = int(around.values[step].argmax())
+        length = int(rng.uniform(3.5, 5.0) * sr)
+        tt = np.arange(length) / sr
+        rolls = 0.4 + 0.6 * dsp.to_audio_rate(rng.uniform(0, 1, 16), length) ** 2
+        rumble = dsp.spectral_filter(
+            dsp.coloured_noise(length, rng, 2.0), low_hz=25, high_hz=rng.uniform(150, 300)
+        )
+        clap = np.zeros(n)
+        start = int(start_s * sr)
+        clap[start : start + length] = 1.6 * rumble * np.clip(tt / 0.25, 0, 1) * np.exp(-tt / 1.4) * rolls
+        loud = min(float(thunders[step, cell]), 1.0) / float(distance[cell])
+        space.add_bed(float(around.bearing[cell]), clap * loud * envelope)
+
+    # 5. Viento: sin dirección, según lo que llueve en el propio punto
+    a, b = (spatial.unit_noise(rng, 1.4, 40, m.wind_hz) for _ in range(2))
+    wind = np.stack([a, 0.4 * a + 0.6 * b])
+    here = spatial.follow(field(lambda cell: cell.wind_rms)[:, around.km == 0].max(axis=1))
+    wind *= here / _rms(wind) * (1 - m.gustiness * (1 - gust_curve)) * envelope
+
+    # Al aire libre: una sala corta y tenue
+    return dsp.soft_limit(space.render(0.6) + wind)

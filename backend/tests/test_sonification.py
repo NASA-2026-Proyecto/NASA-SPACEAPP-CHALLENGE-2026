@@ -18,12 +18,15 @@ from app.services.sonification import (
     UnknownSoundError,
     cell_of,
     sample_point,
+    survey,
 )
 from tests.conftest import make_settings
 from tests.fake_scenes import N_LAT, N_LON, cell, scene_of, store_of
 
 FIRE = (-8.5, 20.5)  # un incendio de 6 MW en esta celda
 RAIN = (5.5, -75.5)  # llueve aquí y cada vez más hacia el este
+WEST_OF_FIRE = (FIRE[0], FIRE[1] - 2)  # sin fuego en sus 3 x 3 celdas: en estéreo no suena
+VERSION = "20261114T2130Z"
 
 
 def fire_field() -> np.ndarray:
@@ -288,3 +291,112 @@ def test_audio_route_asks_to_retry_when_busy(api, monkeypatch):
     assert response.status_code == 503
     assert response.headers["retry-after"] == "2"
     assert response.headers["cache-control"] == "no-store"
+
+
+# --- En tres dimensiones -------------------------------------------------------------
+
+
+def test_survey_reads_every_cell_around_the_point_at_every_step(stores):
+    around = survey(SOUNDS["fire"], stores["fires-latest"].get(), FIRE[0] + 0.3, FIRE[1] - 0.2)
+    assert (around.lat, around.lon, around.far_km) == (*FIRE, 400)
+    assert around.stamps == ("2026-11-14T18:30Z", "2026-11-14T21:30Z")
+    assert around.values.shape == (2, around.km.size)
+    assert around.km.max() <= 400 and around.km.size > 40
+
+    own = np.flatnonzero(around.km == 0)
+    assert own.size == 1 and around.values[:, own[0]].tolist() == [0.0, 6.0]
+    # El otro incendio queda tres celdas al este; la celda de encima, justo al norte
+    other = int(np.flatnonzero(around.values[1] == 2.0)[0])
+    assert around.km[other] == pytest.approx(330, abs=5)
+    assert around.bearing[other] == pytest.approx(90, abs=1)
+    north = np.flatnonzero(np.isclose(around.bearing, 0) & (around.km > 0) & (around.km < 120))
+    assert north.size == 1 and around.km[north[0]] == pytest.approx(111.2, abs=0.5)
+
+
+def test_survey_crosses_the_date_line_reaches_around_the_pole_and_fills_gaps():
+    field = np.full((N_LAT, N_LON), np.nan, dtype="float32")
+    field[cell(0.5, -179.5)] = 5.0
+    scene = scene_of("pm25-latest", {"pm25": field})
+
+    around = survey(SOUNDS["air"], scene, 0.5, 179.5)
+    east = int(around.values[1].argmax())
+    assert around.values[1, east] == 5.0
+    assert (around.bearing[east], around.km[east]) == pytest.approx((90, 111.2), abs=1)
+    assert np.count_nonzero(around.values) == 1  # donde no hay dato cuenta como cero
+
+    # Junto al polo el radio abarca todas las longitudes: hacia el norte, cruzando el polo, está
+    # la celda del meridiano opuesto, tan cerca como la que queda justo al sur
+    polar = survey(SOUNDS["air"], scene, 89.5, 0.5)
+    one_cell_away = np.isclose(polar.km, 111.2, atol=0.5)
+    northward = np.minimum(polar.bearing, 360 - polar.bearing) < 0.5
+    assert np.count_nonzero(one_cell_away & northward) == 1
+    assert np.count_nonzero(one_cell_away & np.isclose(polar.bearing, 180, atol=0.5)) == 1
+    assert 3 * N_LON < polar.km.size < 4 * N_LON and polar.km.max() <= 400
+    assert np.count_nonzero(polar.km == 0) == 1
+
+
+def test_in_3d_a_far_fire_sounds_where_stereo_is_silent(sonifier):
+    assert sonifier.read("fire", *WEST_OF_FIRE).status == "absent"
+    reading = sonifier.read("fire", *WEST_OF_FIRE, "binaural")
+    assert (reading.status, reading.mode, reading.value) == ("ok", "binaural", 0.0)
+    assert reading.intensity == 0.75 and reading.parameters["fire"] == "un incendio alrededor"
+    assert reading.audio == f"fire/{VERSION}.wav?lat=-8.5&lon=18.5&mode=binaural"
+    assert reading.description.startswith("Sonido 3D para auriculares")
+    assert "emite unos 6,0 MW y está a unos 220 km hacia el este" in reading.description
+
+
+def test_in_3d_no_fire_in_the_whole_surroundings_means_no_sound(sonifier):
+    reading = sonifier.read("fire", 40.5, -3.5, "binaural")
+    assert (reading.status, reading.mode, reading.value) == ("absent", "binaural", 0.0)
+    assert reading.description.startswith("Sin incendios activos a menos de 400 km de este punto")
+    assert reading.audio is None and reading.parameters is None
+    with pytest.raises(NoAudioError, match="no suena nada"):
+        sonifier.render("fire", VERSION, 40.5, -3.5, mode="binaural")
+
+
+def test_rain_in_3d_describes_its_surroundings(sonifier):
+    reading = sonifier.read("rain", *RAIN, "binaural")
+    assert (reading.status, reading.mode, reading.value) == ("ok", "binaural", 2.0)
+    assert "Recorre los 2 pasos de la serie, del 14 nov 2026, 18:30 UTC al 14 nov 2026, 21:30 UTC" in (
+        reading.description
+    )
+    assert "donde más, unos 12,0 mm/h (lluvia fuerte)" in reading.description
+    assert reading.audio.endswith("&mode=binaural")
+
+
+def test_stereo_is_the_default_and_the_answer_for_sounds_without_3d(sonifier):
+    assert sonifier.read("rain", *RAIN).mode == "stereo"
+    # El aire aún no tiene versión en tres dimensiones: pedirla da la lectura del estéreo
+    asked = sonifier.read("air", 40.5, -3.5, "binaural")
+    assert asked.mode == "stereo" and asked.audio == f"air/{VERSION}.wav?lat=40.5&lon=-3.5"
+    assert asked == sonifier.read("air", 40.5, -3.5)
+    assert sonifier.read("air", 60.5, -150.5, "binaural").status == "no_data"
+
+
+@pytest.fixture(scope="module")
+def far_fire_wav(stores) -> bytes:
+    return Sonifier(stores).render("fire", VERSION, *WEST_OF_FIRE, mode="binaural")
+
+
+def test_3d_audio_is_the_same_kind_of_file_and_leans_to_where_the_fire_is(far_fire_wav):
+    with wave.open(io.BytesIO(far_fire_wav)) as wav:
+        assert (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) == (2, 2, 44_100)
+        assert wav.getnframes() == 15 * 44_100
+        pcm = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2").reshape(-1, 2).astype(float)
+    left, right = np.sqrt(np.mean(pcm**2, axis=0))
+    assert right > 1.2 * left > 0  # el incendio está al este
+
+
+def test_3d_routes_take_the_mode_and_reject_unknown_ones(api, far_fire_wav):
+    point = {"lat": WEST_OF_FIRE[0], "lon": WEST_OF_FIRE[1]}
+    assert api.get("/api/sounds/fire", params=point).json()["mode"] == "stereo"
+    reading = api.get("/api/sounds/fire", params={**point, "mode": "binaural"}).json()
+    assert (reading["status"], reading["mode"]) == ("ok", "binaural")
+
+    response = api.get(f"/api/sounds/{reading['audio']}")
+    assert response.status_code == 200 and response.headers["content-type"] == "audio/wav"
+    assert response.content == far_fire_wav  # el mismo punto suena siempre igual
+    assert api.get(f"/api/sounds/fire/{VERSION}.wav", params=point).status_code == 404  # en estéreo, nada
+
+    assert api.get("/api/sounds/fire", params={**point, "mode": "surround"}).status_code == 422
+    assert api.get(f"/api/sounds/fire/{VERSION}.wav", params={**point, "mode": "5.1"}).status_code == 422

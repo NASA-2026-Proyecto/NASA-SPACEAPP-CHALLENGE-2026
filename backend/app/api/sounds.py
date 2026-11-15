@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
-from app.schemas import SoundList, SoundReading
+from app.schemas import SoundList, SoundMode, SoundReading
 from app.services.sonification import (
     BusyError,
     NoAudioError,
@@ -20,6 +20,10 @@ BUSY_RETRY_SECONDS = "2"
 
 Latitude = Annotated[float, Query(ge=-90, le=90, description="Latitud, grados norte")]
 Longitude = Annotated[float, Query(ge=-180, le=180, description="Longitud, grados este")]
+Mode = Annotated[
+    SoundMode,
+    Query(description="stereo, o binaural: en tres dimensiones, para oír con auriculares"),
+]
 
 
 def _sonifier(request: Request) -> Sonifier:
@@ -53,11 +57,16 @@ def list_sounds(request: Request) -> SoundList:
     },
 )
 def read_sound(
-    sound_id: str, lat: Latitude, lon: Longitude, request: Request, response: Response
+    sound_id: str,
+    lat: Latitude,
+    lon: Longitude,
+    request: Request,
+    response: Response,
+    mode: Mode = "stereo",
 ) -> SoundReading:
-    """Lee el punto en el paso más reciente de la escena. No genera el audio, así que es rápido."""
+    """Lee el punto (en binaural, también su entorno). No genera el audio, así que es rápido."""
     try:
-        reading = _sonifier(request).read(sound_id, lat, lon)
+        reading = _sonifier(request).read(sound_id, lat, lon, mode)
     except UnknownSoundError:
         raise HTTPException(status_code=404, detail="Sonido desconocido.") from None
     except SceneNotReadyError:
@@ -78,10 +87,17 @@ def read_sound(
         503: {"description": "Se están generando otros sonidos; reintentar en unos segundos"},
     },
 )
-def render_sound(sound_id: str, version: str, lat: Latitude, lon: Longitude, request: Request) -> Response:
+def render_sound(
+    sound_id: str,
+    version: str,
+    lat: Latitude,
+    lon: Longitude,
+    request: Request,
+    mode: Mode = "stereo",
+) -> Response:
     """Genera el audio. Es siempre el mismo para la misma dirección, así que se puede cachear."""
     try:
-        audio = _sonifier(request).render(sound_id, version, lat, lon)
+        audio = _sonifier(request).render(sound_id, version, lat, lon, mode=mode)
     except (UnknownSoundError, NoAudioError):
         raise HTTPException(status_code=404, detail="No hay sonido para esa dirección.") from None
     except BusyError:

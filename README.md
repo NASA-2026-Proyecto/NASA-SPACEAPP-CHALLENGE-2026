@@ -14,7 +14,7 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 
 1. **Observe:** Earth observation layers are drawn on a 3D globe (NASA GIBS imagery).
 2. **Explore:** rotate the globe, switch layers on and off, and click any point on Earth.
-3. **Listen:** the active layer becomes sound at the point you click, by fixed rules: more of it gives a denser, louder sound, and it arrives from the side where there is more. A text description says what you are hearing.
+3. **Listen:** the active layer becomes sound at the point you click, by fixed rules: more of it gives a denser, louder sound, and it arrives from the side where there is more. A text description says what you are hearing. With headphones, switch on **3D con auriculares**: every fire or rain cell around the point then sounds from where it is (north in front, east to the right, far things fainter), and what moves across the map over the last hours or days moves around you.
 
 ### Current status (prototype)
 
@@ -27,10 +27,11 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 | Click on the globe → the data of the active layer at that point: PM2.5, aerosol composition and trend (aerosols); the strongest fire nearby and its last days (fires); rain and snow rates and their last hours (precipitation) | ✅ Working |
 | Sonification of the clicked point: the active layer is translated into a 15-second sound by fixed rules (air: a drone and dust that grow with PM2.5; rain: drops per second, wind and thunder; fire: crackles and flame that grow with radiative power), with a spoken description of what is heard | ✅ Working |
 | One data layer at a time: what you see is what you hear; with no layer on, the app stays silent | ✅ Working |
-| API: `/api/health` and `/api/scenes` (`pm25-latest`, `aerosol-latest`, `fires-latest`, `precipitation-latest`) and `/api/sounds` (`air`, `rain`, `fire`), with a typed, documented contract | ✅ Working |
+| 3D sound for headphones (binaural) for fires and precipitation: each cell around the point sounds from its real direction and distance, and the clip plays the whole time series, so a storm crossing the map crosses from one ear to the other | ✅ Working |
+| API: `/api/health` and `/api/scenes` (`pm25-latest`, `aerosol-latest`, `fires-latest`, `precipitation-latest`) and `/api/sounds` (`air`, `rain`, `fire`; `mode=stereo` or `binaural`), with a typed, documented contract | ✅ Working |
 | Fires layer: the EIC daily visualization *Active Fires As Observed by VIIRS*, decoded into fire radiative power (MW) and animated day by day over the last week | ✅ Working |
 | Precipitation layer: the EIC visualization *Near Real-Time Global Precipitation* (GPM IMERG), decoded into rain and snow rates (mm/h) and animated over the last 21 hours | ✅ Working |
-| Sounds for snow and temperature | 🔜 Pending |
+| Sounds for snow and temperature; 3D sound for the aerosol layer | 🔜 Pending |
 
 ## Architecture
 
@@ -54,6 +55,7 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 
 - **Data scenes.** The backend fetches NASA data once per update (not once per click), converts it to a compact *scene* (a JSON manifest plus one binary grid per variable) and keeps it in memory. The browser downloads the scene and draws it on the globe, so interaction never waits on NASA.
 - **Sound made from the data.** On a click, the backend reads the point in the scene it already holds and synthesises a 15-second clip with numpy (`/api/sounds`). Each sound hangs on one number computed from the data, with fixed formulas, so the same data always gives the same sound: it is a translation of the measurement, not music. Rendering costs about a second of CPU per click, so at most two clips are rendered at once; a pre-rendered bank of clips is the planned fallback if that does not scale.
+- **Sound in three dimensions.** The optional headphone mode places every data cell around the clicked point at its real bearing and distance, using the measured responses of a dummy head (KEMAR): sound from the east reaches the right ear sooner and louder, far sources are fainter, duller and more reverberant, and the clip walks through every time step of the layer. It is the same fixed translation of the data, with direction, distance and time added. Stereo stays the default because the 3D mode only works on headphones.
 
 - **Two images served from one origin.** nginx serves the site and forwards `/api/*` to the API, so the frontend only uses relative URLs (`/api/...`). The same frontend code works locally, in Docker and on any host that can route `/api` to the backend.
 - **No database.** The backend holds no user data; its only state is the scenes it has built, kept in the memory of the process and rebuilt from NASA after a restart. Because of that it is meant to run as **one long-lived instance** for now: several replicas would each build their own copy, and a serverless host would rebuild on every cold start. Persisting the built scenes to shared storage is the step that would lift this.
@@ -242,4 +244,5 @@ The app is currently run locally. Because the frontend only calls relative `/api
 - [MapLibre GL JS](https://maplibre.org/), [Three.js](https://threejs.org/), [Bootstrap](https://getbootstrap.com/), [FastAPI](https://fastapi.tiangolo.com/)
 - [NASA Scientific Visualization Studio](https://svs.gsfc.nasa.gov/5113/): the Earth Information Center daily visualization *Active Fires As Observed by VIIRS*
 - [NASA Scientific Visualization Studio](https://svs.gsfc.nasa.gov/4285/): the Earth Information Center visualization *Near Real-Time Global Precipitation from the Global Precipitation Measurement Constellation* (IMERG)
+- [MIT Media Lab KEMAR HRTF measurements](https://sofacoustics.org/data/database/mit/): the head responses behind the 3D sound. W. G. Gardner and K. D. Martin, "HRTF measurements of a KEMAR", *J. Acoust. Soc. Am.* 97, 1995
 - Planned: live VIIRS fire detections ([NASA GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api), [FIRMS](https://firms.modaps.eosdis.nasa.gov/))

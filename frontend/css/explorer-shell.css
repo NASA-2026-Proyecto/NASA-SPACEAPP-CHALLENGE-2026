@@ -551,6 +551,19 @@
   
   .ej-player__description { margin: 12px 0 0; font-size: 0.78rem; line-height: 1.45; color: var(--ej-text); }
   .ej-player__description:empty { display: none; }
+
+  /* Interruptor del sonido en tres dimensiones */
+  .ej-spatial {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 14px 0 0;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .ej-spatial__note { margin: 6px 0 0; font-size: 0.72rem; line-height: 1.4; color: var(--ej-muted); }
+  .ej-spatial__note:empty { display: none; }
   .ej-play:disabled { opacity: 0.45; cursor: not-allowed; }
   
   /* ---------- Controles del mapa (zoom) ---------- */
