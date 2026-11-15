@@ -47,12 +47,54 @@ function sceneNote(layer, state) {
 }
 
 function buildSpeciesGroup(layer, isAvailable) {
+  const groupId = `layer-${layer.id}-species`;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'ej-species-wrap';
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'ej-species-toggle';
+  toggle.disabled = !isAvailable;
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-controls', groupId);
+
+  const toggleLabel = document.createElement('span');
+  toggleLabel.className = 'ej-species-toggle__label';
+  toggleLabel.textContent = `Tipo`;
+
+  const toggleValue = document.createElement('span');
+  toggleValue.className = 'ej-species-toggle__value';
+  const toggleDot = document.createElement('span');
+  toggleDot.className = 'ej-species-toggle__dot';
+  toggleDot.setAttribute('aria-hidden', 'true');
+  const toggleName = document.createElement('span');
+  toggleName.className = 'ej-species-toggle__name';
+  toggleValue.append(toggleDot, toggleName);
+
+  const chevron = document.createElement('span');
+  chevron.className = 'ej-species-toggle__chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+
+  toggle.append(toggleLabel, toggleValue, chevron);
+
   const group = document.createElement('div');
+  group.id = groupId;
   group.className = 'ej-species';
+  group.hidden = true;
   group.setAttribute('role', 'radiogroup');
   group.setAttribute('aria-label', `Tipo de ${layer.label.toLowerCase()}`);
 
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') === 'true';
+    toggle.setAttribute('aria-expanded', String(!open));
+    wrap.classList.toggle('is-open', !open);
+    group.hidden = open;
+  });
+
   const buttons = new Map();
+  const ids = layer.species.map((species) => species.id);
+
   for (const species of layer.species) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -62,10 +104,22 @@ function buildSpeciesGroup(layer, isAvailable) {
     button.style.setProperty('--species-color', species.color);
     button.textContent = species.label;
     button.addEventListener('click', () => setLayerSpecies(layer.id, species.id));
+    button.addEventListener('keydown', (event) => {
+      const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+      const backward = event.key === 'ArrowLeft' || event.key === 'ArrowUp';
+      if (!forward && !backward) return;
+      event.preventDefault();
+      const index = ids.indexOf(species.id);
+      const next = ids[(index + (forward ? 1 : -1) + ids.length) % ids.length];
+      setLayerSpecies(layer.id, next);
+      buttons.get(next).focus();
+    });
     group.append(button);
     buttons.set(species.id, button);
   }
-  return { group, buttons };
+
+  wrap.append(toggle, group);
+  return { wrap, buttons, toggle, toggleDot, toggleName };
 }
 
 export function initLayerPanel(listElement) {
@@ -132,12 +186,14 @@ export function initLayerPanel(listElement) {
     body.append(head, control);
 
     let speciesButtons = null;
+    let speciesUi = null;
     let note = null;
     let animation = null;
     let animationButton = null;
     let animationLabel = null;
     if (layer.species) {
-      const { group, buttons } = buildSpeciesGroup(layer, isAvailable);
+      speciesUi = buildSpeciesGroup(layer, isAvailable);
+      speciesButtons = speciesUi.buttons;
       note = document.createElement('p');
       note.className = 'ej-layer__note';
       note.setAttribute('aria-live', 'polite');
@@ -154,11 +210,11 @@ export function initLayerPanel(listElement) {
       animationLabel = document.createElement('span');
       animationLabel.className = 'ej-layer__anim-label';
       animation.append(animationButton, animationLabel);
-      body.append(group, note, animation);
-      speciesButtons = buttons;
+      body.append(note, animation);
     }
 
     item.append(tile, body, input);
+    if (speciesUi) item.append(speciesUi.wrap);
     listElement.append(item);
     rows.set(layer.id, {
       layer,
@@ -167,6 +223,7 @@ export function initLayerPanel(listElement) {
       slider,
       amount,
       speciesButtons,
+      speciesUi,
       note,
       animation,
       animationButton,
@@ -185,10 +242,17 @@ export function initLayerPanel(listElement) {
       row.amount.textContent = `${Math.round(opacity * 100)} %`;
 
       if (row.speciesButtons) {
+        const activeId = state.species[id];
         for (const [speciesId, button] of row.speciesButtons) {
-          const active = state.species[id] === speciesId;
+          const active = activeId === speciesId;
           button.classList.toggle('is-active', active);
           button.setAttribute('aria-checked', String(active));
+          button.tabIndex = active ? 0 : -1;
+        }
+        const current = row.layer.species.find((species) => species.id === activeId);
+        if (current) {
+          row.speciesUi.toggleName.textContent = current.label;
+          row.speciesUi.toggle.style.setProperty('--species-color', current.color);
         }
         const text = sceneNote(row.layer, state);
         if (row.note.textContent !== text) row.note.textContent = text;

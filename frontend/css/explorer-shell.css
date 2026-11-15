@@ -719,3 +719,183 @@
 .ej-layer__anim-button:hover { background: rgba(255, 255, 255, 0.08); }
 .ej-layer__anim-button:focus-visible { outline: 2px solid var(--ej-accent); outline-offset: 2px; }
 .ej-layer__anim-label { opacity: 0.8; font-variant-numeric: tabular-nums; }
+/* ---------- Panel de capas: alineación fija y textos sin solape ---------- */
+
+.ej-layer { align-items: start; }
+.ej-layer__head { min-height: 22px; }
+.ej-layer > .ej-switch { margin-top: 0; }
+
+.ej-layer__label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ej-layer__amount {
+  width: 44px;
+  white-space: nowrap;
+}
+
+/* ---------- Aerosoles: selector de tipo desplegable ---------- */
+
+.ej-species-wrap {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.ej-species-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--ej-glass-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ej-text);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--ej-transition), background var(--ej-transition);
+}
+
+.ej-species-toggle:hover,
+.ej-species-wrap.is-open .ej-species-toggle {
+  border-color: color-mix(
+    in srgb,
+    var(--species-color, var(--ej-accent)) 55%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--species-color, var(--ej-accent)) 8%,
+    transparent
+  );
+}
+
+.ej-species-toggle:focus-visible {
+  outline: 2px solid var(--ej-accent);
+  outline-offset: 2px;
+}
+.ej-species-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ej-species-toggle__label {
+  flex: none;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ej-muted);
+}
+
+.ej-species-toggle__value {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.ej-species-toggle__dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--species-color, var(--ej-accent));
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--species-color, var(--ej-accent)) 25%, transparent);
+}
+
+.ej-species-toggle__name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ej-species-toggle__chevron {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--ej-muted);
+  border-bottom: 1.5px solid var(--ej-muted);
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform var(--ej-transition);
+}
+
+.ej-species-wrap.is-open .ej-species-toggle__chevron {
+  transform: rotate(-135deg) translateY(-2px);
+}
+
+.ej-species {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ej-species[hidden] {
+  display: none;
+}
+
+.ej-species__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ej-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color var(--ej-transition), background var(--ej-transition),
+    color var(--ej-transition);
+}
+
+.ej-species__option:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.ej-species__option::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--species-color);
+  transition: box-shadow var(--ej-transition);
+}
+
+.ej-species__option:hover {
+  color: var(--ej-text);
+  border-color: color-mix(in srgb, var(--species-color) 50%, transparent);
+}
+
+.ej-species__option.is-active {
+  color: var(--ej-text);
+  border-color: var(--species-color);
+  background: color-mix(in srgb, var(--species-color) 14%, transparent);
+}
+
+.ej-species__option.is-active::before {
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--species-color) 28%, transparent);
+}
+
+.ej-species__option:focus-visible {
+  outline: 2px solid var(--species-color);
+  outline-offset: 2px;
+}
+.ej-species__option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
