@@ -8,13 +8,7 @@ import { createStarfield } from '../effects/starfield.js';
 import { store, setReading } from '../state/app-store.js';
 import { activeLayer } from '../core/layers.js';
 import { getScene } from '../data/scene-cache.js';
-import {
-  PM25_SCENE,
-  LIVE_SCENE,
-  emptyReading,
-  readPm25,
-  readAerosols,
-} from '../data/point-reading.js';
+import { LAYER_READERS, emptyReading } from '../data/point-reading.js';
 import { createPointCard } from '../ui/point-card.js';
 
 mountIcons();
@@ -38,7 +32,7 @@ const status = createGlobeStatus({
   textElement: document.getElementById('globe-status-text'),
 });
 
-// Paneles plegables: capas (izquierda) y sonido (derecha)
+// Paneles plegables: capas (izquierda) y punto seleccionado (derecha)
 function setPanelOpen(toggle, open) {
   const name = toggle.dataset.panelName;
   toggle.setAttribute('aria-expanded', String(open));
@@ -58,33 +52,56 @@ for (const toggle of panelToggles) {
   if (isNarrow) setPanelOpen(toggle, false);
 }
 
-// Clic en el globo: lee ese punto en las escenas (ya descargadas o pidiéndolas ahora) y lo
-// muestra en una ficha fija. La lectura se guarda en el store; el reproductor ve el punto
-// nuevo y pide a la API el sonido de la capa activa. Solo cuenta el último clic.
+// Clic en el globo: lee ese punto en las escenas de la capa activa (ya descargadas o
+// pidiéndolas ahora) y lo muestra en la ficha del panel "Punto seleccionado". La lectura se
+// guarda en el store; el reproductor, en ese mismo panel, ve el punto nuevo y pide a la API
+// el sonido de esa capa. Solo cuenta el último clic. Si cambia la capa, el mismo punto se
+// vuelve a leer con la nueva; sin capa activa no se enseña nada.
 const COORD_DECIMALS = 5; // ~1 m: más precisión no aporta nada
 const round = (value) => Number(value.toFixed(COORD_DECIMALS));
 
 function initPointProbe(globe) {
   const card = createPointCard();
-  let latest = null;
+  const coordsSlot = document.getElementById('point-coords');
+  const cardSlot = document.getElementById('point-card');
+  coordsSlot.append(card.coordinates);
+  cardSlot.append(card.element);
 
-  // La ficha va en la esquina inferior derecha, para no tapar el globo; el punto se
-  // señala con un marcador.
-  const dock = document.createElement('aside');
-  dock.className = 'ej-point-dock';
-  dock.hidden = true;
-  dock.setAttribute('aria-label', 'Punto seleccionado');
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.className = 'ej-point-dock__close';
-  close.setAttribute('aria-label', 'Cerrar la ficha del punto');
-  close.textContent = '×';
-  close.addEventListener('click', () => {
-    dock.hidden = true;
-    globe.hideMarker();
-  });
-  dock.append(close, card.element);
-  document.body.append(dock);
+  let point = null; // último punto en el que se hizo clic
+  let layerId = null; // capa con la que se leyó ese punto
+
+  // Lee el punto con la capa activa. Cada parte llega por su cuenta: si una falla, las
+  // demás se muestran igual.
+  function probe() {
+    const target = point;
+    const probedLayerId = layerId;
+    const readers = LAYER_READERS[layerId] ?? {};
+    const current = () => point === target && layerId === probedLayerId;
+    let reading = emptyReading(point, layerId);
+    const show = () => {
+      card.render(reading);
+      setReading(reading);
+    };
+
+    const hasInfo = Object.keys(readers).length > 0;
+    coordsSlot.hidden = !hasInfo;
+    cardSlot.hidden = !hasInfo;
+    show();
+
+    for (const [key, { sceneId, read }] of Object.entries(readers)) {
+      getScene(sceneId)
+        .then((scene) => read(scene, target))
+        .catch((error) => {
+          console.warn(`[punto] Sin datos de la escena "${sceneId}":`, error);
+          return { status: 'error' };
+        })
+        .then((part) => {
+          if (!current()) return; // lo sustituyó otro clic o un cambio de capa
+          reading = { ...reading, parts: { ...reading.parts, [key]: part } };
+          show();
+        });
+    }
+  }
 
   globe.map.on('click', (event) => {
     if (!globe.isOnGlobe(event)) return; // clic en el espacio, no sobre la Tierra
@@ -93,33 +110,19 @@ function initPointProbe(globe) {
     const { lng, lat } = event.lngLat.wrap();
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
-    const point = { lat: round(lat), lon: round(lng) };
-    latest = point;
-    let reading = emptyReading(point);
-    const show = (part) => {
-      if (latest !== point) return; // lo sustituyó un clic posterior
-      reading = { ...reading, ...part };
-      card.render(reading);
-      setReading(reading);
-    };
+    point = { lat: round(lat), lon: round(lng) };
+    layerId = activeLayer(store.getState())?.id ?? null;
+    globe.showMarker([lng, lat]); // el punto se señala en el globo con un marcador
+    probe();
+  });
 
-    show({});
-    dock.hidden = false;
-    globe.showMarker([lng, lat]);
-
-    // Cada fuente llega por su cuenta: si una falla, la otra se muestra igual
-    getScene(PM25_SCENE)
-      .then((scene) => show({ pm25: readPm25(scene, point) }))
-      .catch((error) => {
-        console.warn('[punto] Sin escena de PM2.5:', error);
-        show({ pm25: { status: 'error' } });
-      });
-    getScene(LIVE_SCENE)
-      .then((scene) => show({ live: readAerosols(scene, point) }))
-      .catch((error) => {
-        console.warn('[punto] Sin escena casi en tiempo real:', error);
-        show({ live: { status: 'error' } });
-      });
+  // La ficha enseña los datos de la capa activa: al cambiar de capa, el mismo punto se lee
+  // otra vez (el punto es el mismo objeto, así que el reproductor no lo toma por un clic)
+  store.subscribe((state) => {
+    const nextLayerId = activeLayer(state)?.id ?? null;
+    if (nextLayerId === layerId) return;
+    layerId = nextLayerId;
+    if (point) probe();
   });
 }
 

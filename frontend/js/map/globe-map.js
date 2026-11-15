@@ -208,7 +208,7 @@ export async function createGlobeMap({ container }) {
       const back = map.project(lngLat);
       return Math.hypot(back.x - point.x, back.y - point.y) <= ON_GLOBE_TOLERANCE_PX;
     },
-    // Marca el punto seleccionado sin tapar el globo (su ficha va en una esquina)
+    // Marca el punto seleccionado sobre el globo (su ficha va en el panel de la derecha)
     showMarker(lngLat) {
       if (!marker) {
         const element = document.createElement('div');
@@ -216,9 +216,6 @@ export async function createGlobeMap({ container }) {
         marker = new maplibregl.Marker({ element });
       }
       marker.setLngLat(lngLat).addTo(map);
-    },
-    hideMarker() {
-      marker?.remove();
     },
     destroy() {
       unsubscribe();

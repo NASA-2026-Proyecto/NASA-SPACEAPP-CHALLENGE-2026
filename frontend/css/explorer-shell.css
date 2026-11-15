@@ -273,7 +273,20 @@
   
   .ej-panel__badge svg { width: 18px; height: 18px; display: block; }
   
-  .ej-panel__body { margin-top: 14px; max-height: calc(100vh - var(--ej-nav-h) - 110px); overflow-y: auto; }
+  .ej-panel__body {
+    margin-top: 14px;
+    max-height: calc(100vh - var(--ej-nav-h) - 110px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.45) transparent;
+  }
+  /* El panel del punto crece con su contenido: se queda por encima de la atribución del mapa
+     y, si no cabe, se desplaza por dentro. El hueco a la derecha es para la barra. */
+  .ej-panel--signal .ej-panel__body {
+    max-height: calc(100vh - var(--ej-nav-h) - 150px);
+    margin-right: -8px;
+    padding-right: 8px;
+  }
   .ej-panel__body[hidden] { display: none; }
   
   .ej-panel__actions { margin-top: 12px; }
@@ -571,45 +584,7 @@
   .maplibregl-ctrl-group button:hover { background-color: rgba(255, 255, 255, 0.08); }
   .maplibregl-ctrl-group button .maplibregl-ctrl-icon { filter: invert(1) brightness(1.4); }
   
-  /* ---------- Ficha del punto seleccionado (esquina inferior derecha) ---------- */
-
-  .ej-point-dock {
-    position: fixed;
-    right: var(--ej-gap);
-    bottom: 44px; /* por encima de la atribución del mapa */
-    z-index: 20;
-    width: min(300px, calc(100vw - 2 * var(--ej-gap)));
-    max-height: calc(100vh - 120px);
-    overflow-y: auto;
-    padding: 12px 14px;
-    color: var(--ej-text);
-    font-family: var(--ej-font-body);
-    background: var(--ej-glass);
-    border: 1px solid var(--ej-glass-border);
-    border-radius: 14px;
-    backdrop-filter: blur(18px) saturate(140%);
-    box-shadow: var(--ej-shadow-panel);
-  }
-  .ej-point-dock[hidden] { display: none; }
-
-  .ej-point-dock__close {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    font-size: 18px;
-    line-height: 1;
-    color: var(--ej-muted);
-    cursor: pointer;
-    transition: color var(--ej-transition), background-color var(--ej-transition);
-  }
-  .ej-point-dock__close:hover { color: var(--ej-text); background-color: rgba(255, 255, 255, 0.08); }
-  .ej-point-dock__close:focus-visible { outline: 2px solid var(--ej-accent); outline-offset: 2px; }
+  /* ---------- Ficha del punto seleccionado (dentro del panel de la derecha) ---------- */
 
   /* Marcador del punto seleccionado sobre el globo */
   .ej-marker {
@@ -626,16 +601,9 @@
     to { box-shadow: 0 0 0 14px rgba(255, 255, 255, 0); }
   }
 
-  .ej-point__title {
-    margin: 0 0 2px;
-    font-size: 0.72rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--ej-teal);
-  }
-
   .ej-point__coords {
-    margin: 0;
+    margin: 0 0 12px;
+    color: var(--ej-teal);
     font-family: var(--ej-font-display);
     font-size: 1rem;
     font-variant-numeric: tabular-nums;
@@ -652,7 +620,8 @@
   @media (max-width: 900px) {
     .ej-panel--layers { left: 10px; right: 10px; width: auto; top: calc(var(--ej-nav-h) + 6px); }
     .ej-panel--signal { top: auto; left: 10px; right: 10px; bottom: 64px; width: auto; }
-    .ej-panel__body { max-height: 42vh; }
+    .ej-panel__body,
+    .ej-panel--signal .ej-panel__body { max-height: 42vh; }
     .ej-player__readout { gap: 6px; }
     .ej-wave { height: 64px; }
     .maplibregl-ctrl-group { bottom: 12px; }
@@ -706,6 +675,11 @@
 .ej-point__bar::before { content: ''; display: block; height: 100%; width: var(--share); background: var(--species-color); }
 .ej-point__mix-share { text-align: right; font-variant-numeric: tabular-nums; }
 .ej-point__trend { margin: 6px 0 0; font-size: 0.8rem; }
+.ej-point__trend:empty, .ej-point__value:empty, .ej-point__caption:empty { display: none; }
+/* Serie de la capa (un valor por paso): rótulo de fecha, barra y cifra con su unidad */
+.ej-point__caption { margin: 8px 0 4px; font-size: 0.68rem; opacity: 0.7; }
+.ej-point__series-row { grid-template-columns: 66px 1fr 64px; }
+.ej-point__series-row .ej-point__mix-share { white-space: nowrap; }
 .ej-point__section[data-state="error"] .ej-point__trend,
 .ej-point__section[data-state="error"] .ej-point__value { color: var(--ej-fire); }
 /* Las unidades no se capitalizan: "µg" no es "Mg" */

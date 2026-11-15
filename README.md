@@ -24,13 +24,13 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 | Aerosol layer, default view: the EIC daily visualization *Particulate Matter (PM) 2.5*, decoded from NASA's image back into values and drawn with NASA's own colour scale | ✅ Working |
 | Aerosol layer, alternative views: near-real-time NASA GEOS-FP model data (five aerosol types, refreshed every 3 hours) | ✅ Working |
 | The aerosol layer is animated: it loops through the last 21 hours of data, with a pause button | ✅ Working |
-| Click on the globe → PM2.5 at that point (EIC visualization), aerosol composition and trend over the last 21 hours (GEOS-FP) | ✅ Working |
+| Click on the globe → the data of the active layer at that point: PM2.5, aerosol composition and trend (aerosols); the strongest fire nearby and its last days (fires); rain and snow rates and their last hours (precipitation) | ✅ Working |
 | Sonification of the clicked point: the active layer is translated into a 15-second sound by fixed rules (air: a drone and dust that grow with PM2.5; rain: drops per second, wind and thunder; fire: crackles and flame that grow with radiative power), with a spoken description of what is heard | ✅ Working |
 | One data layer at a time: what you see is what you hear; with no layer on, the app stays silent | ✅ Working |
 | API: `/api/health` and `/api/scenes` (`pm25-latest`, `aerosol-latest`, `fires-latest`, `precipitation-latest`) and `/api/sounds` (`air`, `rain`, `fire`), with a typed, documented contract | ✅ Working |
 | Fires layer: the EIC daily visualization *Active Fires As Observed by VIIRS*, decoded into fire radiative power (MW) and animated day by day over the last week | ✅ Working |
 | Precipitation layer: the EIC visualization *Near Real-Time Global Precipitation* (GPM IMERG), decoded into rain and snow rates (mm/h) and animated over the last 21 hours | ✅ Working |
-| Fires and precipitation in the point card; sounds for snow and temperature | 🔜 Pending |
+| Sounds for snow and temperature | 🔜 Pending |
 
 ## Architecture
 
