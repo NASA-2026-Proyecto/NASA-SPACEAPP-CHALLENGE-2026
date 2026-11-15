@@ -536,7 +536,9 @@
   .ej-volume__icon { color: var(--ej-muted); }
   .ej-volume__icon svg { width: 18px; height: 18px; display: block; }
   
-  .ej-player__legend { margin: 12px 0 0; font-size: 0.75rem; color: var(--ej-muted); }
+  .ej-player__description { margin: 12px 0 0; font-size: 0.78rem; line-height: 1.45; color: var(--ej-text); }
+  .ej-player__description:empty { display: none; }
+  .ej-play:disabled { opacity: 0.45; cursor: not-allowed; }
   
   /* ---------- Controles del mapa (zoom) ---------- */
   

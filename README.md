@@ -14,7 +14,7 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 
 1. **Observe:** Earth observation layers are drawn on a 3D globe (NASA GIBS imagery).
 2. **Explore:** rotate the globe, switch layers on and off, and click any point on Earth.
-3. **Listen:** each variable becomes sound. Higher values give a higher pitch and more intensity.
+3. **Listen:** the active layer becomes sound at the point you click, by fixed rules: more of it gives a denser, louder sound, and it arrives from the side where there is more. A text description says what you are hearing.
 
 ### Current status (prototype)
 
@@ -25,11 +25,12 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 | Aerosol layer, alternative views: near-real-time NASA GEOS-FP model data (five aerosol types, refreshed every 3 hours) | ✅ Working |
 | The aerosol layer is animated: it loops through the last 21 hours of data, with a pause button | ✅ Working |
 | Click on the globe → PM2.5 at that point (EIC visualization), aerosol composition and trend over the last 21 hours (GEOS-FP) | ✅ Working |
-| Sonification of the clicked point: PM2.5 sets pitch and level, composition sets the timbre, the trend plays a short cue | ✅ Working (a simulated signal plays until a point is selected) |
-| API: `/api/health` and `/api/scenes` (`pm25-latest`, `aerosol-latest`, `fires-latest`, `precipitation-latest`), with a typed, documented contract | ✅ Working |
+| Sonification of the clicked point: the active layer is translated into a 15-second sound by fixed rules (air: a drone and dust that grow with PM2.5; rain: drops per second, wind and thunder; fire: crackles and flame that grow with radiative power), with a spoken description of what is heard | ✅ Working |
+| One data layer at a time: what you see is what you hear; with no layer on, the app stays silent | ✅ Working |
+| API: `/api/health` and `/api/scenes` (`pm25-latest`, `aerosol-latest`, `fires-latest`, `precipitation-latest`) and `/api/sounds` (`air`, `rain`, `fire`), with a typed, documented contract | ✅ Working |
 | Fires layer: the EIC daily visualization *Active Fires As Observed by VIIRS*, decoded into fire radiative power (MW) and animated day by day over the last week | ✅ Working |
 | Precipitation layer: the EIC visualization *Near Real-Time Global Precipitation* (GPM IMERG), decoded into rain and snow rates (mm/h) and animated over the last 21 hours | ✅ Working |
-| Fires and precipitation in the point card and in the sound | 🔜 Pending |
+| Fires and precipitation in the point card; sounds for snow and temperature | 🔜 Pending |
 
 ## Architecture
 
@@ -47,11 +48,12 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
                     │ backend · FastAPI (uv)    │  configured by env vars
                     │   /api/health             │
                     │   /api/scenes/…           │──▶ NASA SVS (EIC daily visualizations)
-                    │                           │──▶ NASA GEOS-FP (OPeNDAP)
+                    │   /api/sounds/…           │──▶ NASA GEOS-FP (OPeNDAP)
                     └──────────────────────────┘
 ```
 
-- **Data scenes.** The backend fetches NASA data once per update (not once per click), converts it to a compact *scene* (a JSON manifest plus one binary grid per variable) and keeps it in memory. The browser downloads the scene, draws it on the globe and samples it locally for sound, so interaction never waits on NASA.
+- **Data scenes.** The backend fetches NASA data once per update (not once per click), converts it to a compact *scene* (a JSON manifest plus one binary grid per variable) and keeps it in memory. The browser downloads the scene and draws it on the globe, so interaction never waits on NASA.
+- **Sound made from the data.** On a click, the backend reads the point in the scene it already holds and synthesises a 15-second clip with numpy (`/api/sounds`). Each sound hangs on one number computed from the data, with fixed formulas, so the same data always gives the same sound: it is a translation of the measurement, not music. Rendering costs about a second of CPU per click, so at most two clips are rendered at once; a pre-rendered bank of clips is the planned fallback if that does not scale.
 
 - **Two images served from one origin.** nginx serves the site and forwards `/api/*` to the API, so the frontend only uses relative URLs (`/api/...`). The same frontend code works locally, in Docker and on any host that can route `/api` to the backend.
 - **No database.** The backend holds no user data; its only state is the scenes it has built, kept in the memory of the process and rebuilt from NASA after a restart. Because of that it is meant to run as **one long-lived instance** for now: several replicas would each build their own copy, and a serverless host would rebuild on every cold start. Persisting the built scenes to shared storage is the step that would lift this.

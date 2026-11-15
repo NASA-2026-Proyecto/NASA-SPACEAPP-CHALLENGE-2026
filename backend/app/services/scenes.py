@@ -245,14 +245,19 @@ class SceneStore[ContextT]:
         with self._lock:
             return self._current
 
-    def file(self, version: str, name: str) -> bytes | None:
-        """Bytes de un archivo de la escena actual o de la anterior; None si no existe."""
+    def scene(self, version: str) -> Scene | None:
+        """La escena de esa versión, si es la actual o la anterior; None si no."""
         with self._lock:
             scenes = (self._current, self._previous)
         for scene in scenes:
             if scene is not None and scene.version == version:
-                return scene.files.get(name)
+                return scene
         return None
+
+    def file(self, version: str, name: str) -> bytes | None:
+        """Bytes de un archivo de la escena actual o de la anterior; None si no existe."""
+        scene = self.scene(version)
+        return None if scene is None else scene.files.get(name)
 
     def refresh(self) -> bool:
         """Renueva la escena ahora mismo, esperando a que termine.

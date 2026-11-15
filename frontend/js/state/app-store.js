@@ -24,9 +24,11 @@ export const store = createStore({
   reading: null, // lectura del punto seleccionado (js/data/point-reading.js)
 });
 
+// Solo puede haber una capa de datos activa: encender una apaga las demás. Así lo que se
+// ve y lo que se oye (el sonido es el de la capa activa) son siempre lo mismo.
 export function setLayerVisible(id, visible) {
   store.setState((state) => ({
-    layers: { ...state.layers, [id]: visible },
+    layers: Object.fromEntries(Object.keys(state.layers).map((key) => [key, key === id && visible])),
   }));
 }
 
