@@ -20,11 +20,13 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 
 | Feature | Status |
 |---|---|
-| 3D globe with NASA Blue Marble basemap, night lights and a test aerosol layer (MODIS Terra) | ✅ Working |
+| 3D globe with NASA Blue Marble basemap and night lights | ✅ Working |
+| Aerosol layer with near-real-time NASA GEOS-FP model data (five aerosol types, refreshed every 3 hours) | ✅ Working |
 | Sonification player (pitch, level, live waveform) | ✅ Working, with a **simulated** signal |
 | Click on the globe → coordinates sent to the API → reply shown on the globe | ✅ Working |
-| API: `/api/health`, `/api/point` | ✅ Working |
-| Real data per point (NASA POWER rain, temperature, wind and humidity; NASA EONET events) | 🔜 Next: migrating from an earlier prototype |
+| API: `/api/health`, `/api/point`, `/api/scenes/aerosol-latest` | ✅ Working |
+| EIC daily visualization (PM2.5) as a second data scene on the globe | 🔜 Next |
+| Real values at the clicked point, in the popup and in the sound | 🔜 Next |
 | Wildfires and precipitation layers on the globe | 🔜 Pending |
 
 ## Architecture
@@ -42,8 +44,11 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
                     ┌──────────────────────────┐
                     │ backend · FastAPI (uv)    │  stateless, configured by env vars
                     │   /api/health, /api/point │
+                    │   /api/scenes/…           │──▶ NASA GEOS-FP (OPeNDAP)
                     └──────────────────────────┘
 ```
+
+- **Data scenes.** The backend fetches NASA data once per update (not once per click), converts it to a compact *scene* (a JSON manifest plus one binary grid per variable) and keeps it in memory. The browser downloads the scene, draws it on the globe and samples it locally for sound, so interaction never waits on NASA.
 
 - **Two images served from one origin.** nginx serves the site and forwards `/api/*` to the API, so the frontend only uses relative URLs (`/api/...`). The same frontend code works locally, in Docker and on any host that can route `/api` to the backend.
 - **Stateless backend** with its configuration in environment variables, ready to scale out or to run as a serverless function.
@@ -65,7 +70,8 @@ frontend/              Static site (served as the web root)
   nginx/                 nginx config: template + dev/prod settings
   Dockerfile
 backend/               FastAPI app (uv project)
-  app/                   main.py, config.py, schemas.py, api/ (routes)
+  app/                   main.py, config.py, schemas.py, api/ (routes), services/ (NASA clients, scenes)
+  geosfp/  tools/        Offline data pipeline: download and build scenes by hand
   tests/                 pytest
   pyproject.toml  uv.lock  Dockerfile
 tools/                 One-off scripts (night-lights tile generator)
@@ -148,6 +154,20 @@ curl "http://localhost:8080/api/point?lat=40.4168&lon=-3.7038"
 
 curl "http://localhost:8080/api/point?lat=91&lon=0"
 # 422 with detail "Input should be less than or equal to 90"
+
+curl http://localhost:8080/api/scenes/aerosol-latest/manifest.json
+# The latest aerosol scene: time stamps, grid and one file per aerosol type.
+# Returns 503 for the first ~30 seconds after the backend starts, while it fetches from NASA.
+```
+
+### Offline data pipeline (optional)
+
+`backend/geosfp/` and `backend/tools/` hold scripts to download GEOS-FP episodes and build static scenes by hand. Their libraries are in a separate dependency group that the API does not install:
+
+```bash
+cd backend
+uv run --group pipeline python -m tools.download_global_episode
+uv run --group pipeline python -m tools.build_scene --source data/raw/<file>.nc --scene-id <id>
 ```
 
 On Windows PowerShell, use `curl.exe` (plain `curl` there is an alias for a different command).
@@ -183,6 +203,8 @@ Environment variables are read from `.env` (see [.env.example](.env.example)):
 | `FRONTEND_PORT` | `8080` | Compose | Host port where the app is published |
 | `LOG_LEVEL` | `info` | backend | Uvicorn log level: `critical`, `error`, `warning`, `info` or `debug` |
 | `CORS_ORIGINS` | `[]` | backend | JSON list of origins allowed to call the API directly. Not needed when going through nginx. |
+| `SCENE_STEPS` | `3` | backend | How many 3-hour GEOS-FP steps the aerosol scene holds |
+| `SCENE_WARMUP` | `true` | backend | Start fetching the aerosol scene at startup instead of on the first request |
 | `PORT` | `8000` | backend image | API port inside the container (some platforms set it automatically) |
 | `BACKEND_URL` | `http://backend:8000` | frontend image | Where nginx forwards `/api/*` |
 
@@ -198,8 +220,9 @@ The app is currently run locally. Because the frontend only calls relative `/api
 
 ## Data sources and credits
 
-- [NASA GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api): Blue Marble shaded relief and bathymetry; MODIS Terra aerosol optical depth
+- [NASA GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api): Blue Marble shaded relief and bathymetry
+- [NASA GMAO GEOS-FP](https://gmao.gsfc.nasa.gov/): aerosol optical depth by type (model analysis, every 3 hours), read through its public OPeNDAP service
 - [NASA Earth Observatory](https://earthobservatory.nasa.gov/): *Earth at Night* (night lights)
 - [OpenFreeMap](https://openfreemap.org/), [OpenMapTiles](https://openmaptiles.org/) and [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors: map labels and boundaries
 - [MapLibre GL JS](https://maplibre.org/), [Three.js](https://threejs.org/), [Bootstrap](https://getbootstrap.com/), [FastAPI](https://fastapi.tiangolo.com/)
-- Planned: [NASA POWER](https://power.larc.nasa.gov/) (daily climate variables) and [NASA EONET](https://eonet.gsfc.nasa.gov/) (natural events)
+- Planned: the EIC daily visualization [Particulate Matter (PM) 2.5](https://svs.gsfc.nasa.gov/5151/) and VIIRS active fires ([NASA GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api), [FIRMS](https://firms.modaps.eosdis.nasa.gov/))

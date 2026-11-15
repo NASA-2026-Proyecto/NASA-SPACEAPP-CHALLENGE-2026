@@ -25,14 +25,17 @@ frontend/                 Static site = nginx web root (relative paths everywher
   explorer.html           Main app: MapLibre globe (js/pages/explorer.js)
   css/                    tokens.css (design tokens), base, components, landing, explorer, explorer-shell (panels, popup)
   js/
-    config.js             Layer catalog (LAYERS): id, label, ramp, paint, GIBS source. No `source` = "Pendiente"
+    config.js             Layer catalog (LAYERS): id, label, ramp, paint. `source` = GIBS raster, `kind: 'scene'` + `sceneId` = data scene. Neither = "Pendiente"
+    catalog/scenes.js     Scene catalog (SCENES): id, dataUrl (static folder or API), species (id, label, color), `live`
+    data/scene-data.js    loadScene(baseUrl) (manifest + .f32, checks size and sha256), sampleAt() (interpolated, for sound), cellValueAt() (exact cell, for the popup), createResampler()
+    core/layers.js        isSceneLayer(), isLayerAvailable()
     api/client.js         apiGet()/getPoint(): fetch to relative /api, ApiError, 8 s timeout, AbortSignal
     pages/                Page entry points (landing.js, explorer.js); explorer.js wires the UI and the click → /api/point flow
-    map/                  globe-map.js (createGlobeMap → {map, flyTo, isOnGlobe, showPopup, destroy}), gibs.js,
+    map/                  globe-map.js (createGlobeMap → {map, flyTo, isOnGlobe, showPopup, destroy}), series-layer.js (scene → canvas → raster layer), gibs.js,
                           night-lights.js, land-dots.js, hover-glow.js, auto-spin.js
     ui/                   layer-panel, player (audio UI), waveform, point-card (click popup), mode-toggle, dialog, icons, globe-status
     audio/                audio-engine.js (Web Audio: value 0..1 → 110 Hz × 2^(3v), level), simulated-source.js
-    state/                store.js (tiny pub/sub store), app-store.js (layers, opacity, nightMode)
+    state/                store.js (tiny pub/sub store), app-store.js (layers, opacity, nightMode, species, sceneStep, scenePlaying)
     effects/              starfield.js, dotted-globe.js + globe/* (Three.js landing globe and shaders)
     core/                 animation-loop, motion (reduced motion), resize, pointer-parallax, css-tokens
   assets/                 fonts (woff2), images/earth-water.png (land mask), tiles/nightlights/{z}/{x}/{y}.webp (z0–4, 341 tiles)
@@ -40,13 +43,17 @@ frontend/                 Static site = nginx web root (relative paths everywher
   Dockerfile  .dockerignore
 backend/                  uv project (package = false: an app, run from backend/)
   app/main.py             create_app(settings) factory + module-level `app` (also Vercel's entrypoint)
-  app/config.py           Settings (pydantic-settings, env vars only): cors_origins
+  app/config.py           Settings (pydantic-settings, env vars only): cors_origins, scene_steps, scene_warmup
   app/schemas.py          Health, PointResponse
-  app/api/__init__.py     router with prefix /api; includes health, point
+  app/api/__init__.py     router with prefix /api; includes health, point, scenes
   app/api/params.py       Shared Lat/Lon Query types (ge/le validation → 422)
   app/api/health.py       GET /api/health → {status, version}
   app/api/point.py        GET /api/point?lat&lon → {ok, lat, lon, message}
-  tests/                  conftest (client fixture with explicit Settings), test_app.py, test_point.py
+  app/api/scenes.py       GET /api/scenes/aerosol-latest/manifest.json (503 while building) and /{version}/{species}.f32
+  app/services/geosfp.py  GEOS-FP OPeNDAP client (urllib + numpy): parse_das, parse_dods, GeosFpClient
+  app/services/scenes.py  build_scene() + SceneStore (in-memory, background refresh, keeps previous version)
+  geosfp/  tools/         Alex's OFFLINE pipeline (xarray + pydap): download episodes, build static scenes. Not imported by app/. Run: `uv run --group pipeline python -m tools.<script>`
+  tests/                  conftest (client fixture with explicit Settings and a fake NASA), fakes.py (FakeGeosFp), test_app.py, test_point.py, test_scenes.py
   pyproject.toml  uv.lock  .python-version (3.13)  Dockerfile  .dockerignore
 tools/make-night-tiles.py PEP 723 script: `uv run tools/make-night-tiles.py <earth_nightlights_10K.tif>` → frontend/assets/tiles/nightlights
 compose.yaml              Production-like: backend (prod) + frontend (prod), only 127.0.0.1:${FRONTEND_PORT:-8080} published
@@ -64,7 +71,23 @@ compose.dev.yaml          Overrides: dev targets, repo bind-mounted at /workspac
 - Frontend has **no build step**: plain ES modules. Three.js comes from an importmap (jsdelivr `three@0.186.0`). MapLibre is imported by URL (`https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs`; it spawns its worker from unpkg via a `blob:` URL, which matters for any future CSP). Bootstrap 5.3.8 CSS comes from jsdelivr with SRI.
 - External runtime services (no keys): OpenFreeMap style `https://tiles.openfreemap.org/styles/dark` (unversioned), NASA GIBS WMTS (Blue Marble basemap, layer tiles), CDNs. All send CORS `*`.
 - Globe layer order (bottom → top): GIBS Blue Marble basemap → night lights (local tiles) → NASA data layers from config.js → land dots (GeoJSON from earth-water.png) → labels. OpenFreeMap vector layers are hidden except place, water_name and boundary.
-- State: `app-store.js` holds `{layers, opacity, nightMode, selectedMarker}`; UI modules subscribe and re-render. No framework.
+- State: `app-store.js` holds `{layers, opacity, nightMode, selectedMarker, species, sceneStep, scenePlaying}`; UI modules subscribe and re-render. No framework.
+
+### Data scenes (the common data format)
+
+A **scene** is how gridded data reaches the browser, whatever its source. It was designed by Alex (`backend/tools/build_scene.py`) and is the contract between backend and frontend:
+
+- `manifest.json` (`schema_version: 2`, `kind: "grid-series"`): `time.stamps_utc`, `grid` (`lat_min`, `lat_step`, `lon_min`, `lon_step`, `n_lat`, `n_lon`, `lon_periodic`), and per species `file`, `sha256`, `min`, `max`, `display_scale_max`.
+- One `.f32` per species: float32 little-endian, order `[step][lat][lon]`, south to north, west to east.
+
+Flow for the live aerosol scene (`aerosol-latest`):
+
+1. Backend `SceneStore` asks GEOS-FP for its time axis (`.das`); if there is a newer 3-hour step it fetches each species for the last `SCENE_STEPS` steps on a 1° × 1.25° global grid (one `.dods` request per species, about 3 s each) and builds the scene in memory. It rechecks every 15 min, retries after 30 s on failure, and keeps serving the last good scene.
+2. `.f32` URLs include the scene version (`…/20261114T1330Z/dust.f32`), so they are immutable and cacheable; the previous version stays available.
+3. Frontend loads the scene the first time the layer is switched on (`globe-map.js loadScenesOnDemand`, retry every 5 s on 503), `series-layer.js` paints it to an off-screen canvas re-projected to Web Mercator (alpha grows with the value) and adds it as a MapLibre `canvas` source. For `live` scenes the newest step is shown.
+4. Sound and popup are meant to read values locally with `sampleAt()` / `cellValueAt()`: no server round trip per click.
+
+Rules: do not commit scene data to git (it is built at runtime, or by the offline tools into git-ignored `data/`). New gridded sources should become new scenes in this same format, not new formats.
 
 ### Click → API flow (explorer)
 
@@ -87,7 +110,7 @@ The popup is a single reused `maplibregl.Popup` (`closeOnClick: false`, `focusAf
   - **`prod`**: copies only `/app/.venv` and `app/`, user `app` (uid 10001), HEALTHCHECK via Python urllib, CMD `uvicorn … --port $PORT --log-level $LOG_LEVEL --proxy-headers --forwarded-allow-ips='*'`;
   - **`dev`**: git/curl/procps, user `vscode` (uid 1000), venv at **`/opt/venv`** (`UV_PROJECT_ENVIRONMENT`, outside the bind mount), `UV_COMPILE_BYTECODE=0`, CMD `uvicorn --reload --reload-dir app`.
 - **frontend/Dockerfile**: `nginxinc/nginx-unprivileged:1.30.5-alpine` (uid 101, port 8080). `ENV BACKEND_URL`, `NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1`. The template goes to `/etc/nginx/templates/`, and the entrypoint's envsubst only substitutes *defined* env vars. The `dev` target uses dev.conf (no-store, sendfile off); the `prod` target uses prod.conf and copies index.html, explorer.html, css, js and assets explicitly.
-- Images: backend prod ~234 MB, dev ~519 MB; frontend prod ~107 MB.
+- Images: backend prod ~327 MB (numpy), dev ~519 MB before numpy; frontend prod ~107 MB.
 
 ## Commands
 
@@ -144,28 +167,36 @@ The Compose project name is `earth-jukebox` (containers `earth-jukebox-backend-1
 ## Known issues and tech debt
 
 - `frontend/assets/images/earth-water.png` is 16200×8100 (4.7 MB) but only used downscaled to 720×360, on both pages. Decoding it takes about 525 MB of RAM, which is a risk on mobile. A 1440×720 version would do.
-- `config.js` aerosol layer: GIBS `MODIS_Terra_Aerosol`, date fixed at `2014-04-09` (a known-good sample).
-- The sonification player uses `createSimulatedSource()`; it is not yet connected to API data.
-- The explorer panel note still reads "PENDIENTE"; the fire and rain layers have no `source`.
+- The sonification player uses `createSimulatedSource()`; it is not yet connected to scene data.
+- The click popup only shows coordinates (`/api/point` echoes them).
+- No time control: `sceneStep` / `scenePlaying` exist in the store but nothing in the UI changes them.
+- NASA is a runtime dependency: if GEOS-FP is down when the backend starts, the aerosol layer stays empty until it recovers (no on-disk copy of the last scene). The in-memory scene is per process, so a serverless host would rebuild it on every cold start.
+- GEOS-FP "assim" data runs about 12 hours behind real time.
+- `gibs.js` is currently unused (no layer has a GIBS `source`); it will be needed again for fires.
+- The explorer panel note still reads "PENDIENTE"; the fire and rain layers have no data.
+- `SCENE_STEPS` and `SCENE_WARMUP` are not in `.env.example` (Claude cannot edit it).
 
-## Next steps (planned)
+## Verified NASA facts (probed 14-15 Nov 2026)
 
-Migrate the rest of the earlier backend from `D:\NASA-Proyecto`, branch `origin/BackEnd---Gabriel` (commit 4239d15). It has a clean FastAPI design and 63 tests.
-- **Bring over:**
-  - `catalog.py` (layer specs);
-  - providers (`DataProvider` protocol, `SimulatedProvider`, `PowerProvider` for NASA POWER, no key);
-  - `services/` (TTL cache, urllib HTTP client, land/ocean/ice `geo.py` + `data/land_mask.npy`, normalize, status phrases);
-  - `services/events.py` + `api/events.py` (NASA EONET);
-  - `api/layers.py` (`/api/layers`, `/{id}/value`, `/{id}/series`), reusing `app/api/params.py` Lat/Lon;
-  - the tests. It adds **numpy**.
-- **Do not bring over** any of these, because the new frontend uses MapLibre + OpenFreeMap and needs no token:
-  - the Mapbox token machinery (`MAPBOX_TOKEN`, `/js/config.local.js`, `write_config_local.py`);
-  - `_mount_frontend`;
-  - `requirements*.txt`;
-  - the root Dockerfile;
-  - `render.yaml`.
-- **Fix during migration:**
-  - rebuild `land_mask.npy` from the new earth-water.png with `scripts/build_land_mask.py` (0.41% of cells differ);
-  - the layer ids differ (backend: fire, rain, temp, wind, humidity; frontend config.js: fire, rain, aerosol). `test_layers_match_frontend_catalog` looks for `REPO_ROOT/js/config.js`, which is now `frontend/js/config.js`, so it would silently skip.
-- Then connect the click popup and the audio player to `/api/layers/{id}/value` and `/series`.
-- Victor's old branch `feature/containerize-frontend--victor` was the base for the nginx setup (already migrated).
+More detail and evidence live in the sibling exploration repo `D:\nasa-sonification` (its CLAUDE.md and `explore/` notebooks).
+
+- **GEOS-FP OPeNDAP** (`https://opendap.nccs.nasa.gov/dods/GEOS-5/fp/0.25_deg/assim/tavg3_2d_aer_Nx`, no key): 3-hourly, 0.25° × 0.3125° (721 × 1152). AOD per species: `brexttau`, `bcexttau`, `duexttau`, `ssexttau`, `suexttau`, plus `ocexttau`, `niexttau`, `totexttau`; surface `pm25`. Fill value 1e15. Sometimes answers 502/504.
+- **EIC daily visualization PM2.5 (SVS 5151)**: 372 hourly PNG frames, 2048×1024, equirectangular, re-rendered daily, from GEOS-CF (not GEOS-FP). Logo, timestamp (US Eastern) and coastlines are burned in. Colour bar is a log ramp 0.4–409.6 µg/m³ (`PM2.5_colorbar_plain.png`); colours convert back to values (the notebooks do it). JSON metadata: `https://svs.gsfc.nasa.gov/api/5151`.
+- **EIC fires (SVS 5113)**: `VIIRS_fires_latest.png` is an oval projection with date and legend burned in, so it cannot be draped on the globe. The equirectangular version exists only as EXR frames and a 51 MB MP4.
+- **SVS sends `Access-Control-Allow-Origin` for one unrelated site only**, so the browser cannot load SVS images into MapLibre or a canvas: they must go through the backend.
+- **GIBS** has `VIIRS_NOAA20_Thermal_Anomalies_375m_All` (vector tiles, `GoogleMapsCompatible_Level8`, daily through today, no key).
+- **FIRMS** needs a free MAP_KEY.
+
+## Next steps (agreed plan)
+
+Design principle: the **EIC daily visualization is the field** (complete global picture: where, and how much) and the **near-real-time API is the probe** (exact values at a point: composition and trend). Never drive the same visual or sound property from two sources. Both reach the browser as scenes.
+
+- **Phase B, bring in the daily visualization:**
+  1. Backend: a `pm25-latest` scene that decodes the newest SVS 5151 frame (colour → value, fill gaps under logo/timestamp/coastlines) into the scene format. Reuse `SceneStore`; port the decoding from `D:\nasa-sonification\explore\nasa_sources.py` (`gradient_from_colour_bar`, `invert_gradient`). Adds Pillow.
+  2. Globe: draw it through `series-layer.js` with a colour-ramp mode (NASA's ramp, alpha by value). **Decided (option B):** the species buttons stay and gain a first "PM2.5" button (default) that shows the EIC scene; the other five still draw that live GEOS-FP species.
+- **Phase C, live data at a point:**
+  1. Popup: PM2.5 value, species breakdown and trend over the last 3 steps, read locally from the scenes.
+  2. Sound: replace the simulated source. PM2.5 → pitch and level; species shares → timbre; trend → a short cue. Mapping ideas are in the notebooks 03/04 of the exploration repo.
+- **Phase D, fires:** "Incendios" loads the GIBS VIIRS tiles; live numbers near the click need a FIRMS key.
+
+The earlier idea of migrating Gabriel's backend from `D:\NASA-Proyecto` (NASA POWER, EONET, `/api/layers`) is on hold: this plan replaces it. Do not bring its Mapbox token machinery, `requirements*.txt` or root Dockerfile in any case.
