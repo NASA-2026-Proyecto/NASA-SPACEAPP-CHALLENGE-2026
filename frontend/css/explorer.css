@@ -72,27 +72,7 @@
     text-align: center;
     padding: var(--ej-space-lg);
   }
-  
-  .panel-layers {
-    position: absolute;
-    top: var(--ej-space-md);
-    left: var(--ej-space-md);
-    width: min(280px, calc(100% - 2rem));
-    z-index: 2;
-  }
-  
-  .layer-list {
-    margin: 0;
-    padding: 0;
-  }
-  
-  .layer-item {
-    display: flex;
-    align-items: center;
-    gap: var(--ej-space-sm);
-    padding: var(--ej-space-sm) 0;
-  }
-  
+    
   .layer-item .form-check-input {
     margin: 0;
     float: none;
@@ -103,14 +83,7 @@
     align-items: center;
     gap: var(--ej-space-sm);
   }
-  
-  .layer-dot {
-    width: 0.75rem;
-    height: 0.75rem;
-    border-radius: 50%;
-    background: var(--dot-color);
-  }
-  
+    
   .globe__map {
     position: absolute;
     inset: 0;
