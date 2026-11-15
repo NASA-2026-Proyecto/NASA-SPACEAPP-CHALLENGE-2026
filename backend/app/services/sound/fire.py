@@ -5,18 +5,27 @@ más fuerte de la zona es débil, un incendio alrededor del oyente cuando alcanz
 extremo de la escala. Todo cuelga de un número, `intensity`: la potencia radiativa (FRP)
 del incendio más fuerte junto al punto, dividida entre los 8 MW en que acaba la barra de
 color de la NASA (escala lineal). Donde no hay ningún incendio cerca no hay sonido.
+
+En tres dimensiones (`synthesize_spatial`) cada celda que arde en el entorno es un fuego
+aparte, con los parámetros de su propia potencia, que suena desde su rumbo y su distancia
+y cambia con los pasos de la serie. El timbre común (el tono de los chasquidos, el aleteo)
+es el del incendio que más se oye.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 
-from app.services.sound import dsp
+from app.services.sound import dsp, spatial
 from app.services.sound.common import (
     SECONDS,
     TAIL,
     PointSample,
+    Surroundings,
     compass,
+    describe_journey,
+    describe_place,
     describe_stamp,
     direction_weights,
     fade_envelope,
@@ -26,6 +35,9 @@ from app.services.sound.dsp import SAMPLE_RATE, Signal
 
 UNIT = "MW"
 POWER_FULL = 8.0  # MW en el extremo alto de la barra de color de la NASA (lineal)
+NEAR_KM = 30.0  # en 3D, hasta esta distancia un incendio suena junto al oyente (su propia celda)
+CLICK_SECONDS = (0.00045, 0.0007, 0.0011)  # en 3D, lo que tarda en apagarse cada forma de chasquido
+SNAPS = ((0.005, 450.0), (0.008, 700.0))  # en 3D, formas de chascazo: lo que dura y su tono (Hz)
 
 # Qué fuego se oye según la intensidad (límite superior, nombre)
 FIRES = (
@@ -218,4 +230,108 @@ def synthesize(sample: PointSample, m: FireParameters, seed: int = 0) -> Signal:
         wet=0.10 + 0.15 * (1 - m.intensity),
     )
     mix *= 10 ** (m.loudness_db / 20)
+    return dsp.soft_limit(mix)
+
+
+def _distances(around: Surroundings) -> Signal:
+    """A cuántos metros suena cada celda del entorno."""
+    return spatial.metres(around.km, NEAR_KM, around.far_km)
+
+
+def _loudest(around: Surroundings) -> tuple[int, int]:
+    """Paso y celda del incendio que más se oye: el más potente para lo lejos que está."""
+    heard = np.clip(around.values / POWER_FULL, 0, 1) / _distances(around)
+    step, cell = np.unravel_index(int(heard.argmax()), heard.shape)
+    return int(step), int(cell)
+
+
+def spatial_mapping(around: Surroundings) -> FireParameters:
+    """Los parámetros del incendio que más se oye en el entorno: de él sale el timbre del conjunto."""
+    return mapping(float(around.values[_loudest(around)]))
+
+
+def describe_spatial(around: Surroundings, m: FireParameters) -> str:
+    """Dice con palabras qué se oye en tres dimensiones (también para lectores de pantalla)."""
+    step, cell = _loudest(around)
+    burning = int(np.count_nonzero(around.values[-1] > 0))
+    return (
+        f"{describe_journey(around)} Incendios activos vistos por el satélite VIIRS hasta "
+        f"{number(around.far_km, 0)} km del punto: cada celda que arde suena desde donde está. "
+        f"El que más se oye emite unos {number(float(around.values[step, cell]))} MW y está "
+        f"{describe_place(around, cell)}; suena como {m.fire}. En el paso más reciente hay fuego en "
+        f"{burning} de las {around.km.size} celdas del entorno."
+    )
+
+
+def describe_absent_spatial(around: Surroundings) -> str:
+    """Qué se dice donde no hay ningún incendio en todo el entorno: ahí no suena nada."""
+    return (
+        f"Sin incendios activos a menos de {number(around.far_km, 0)} km de este punto entre el "
+        f"{describe_stamp(around.stamps[0])} y el {describe_stamp(around.stamps[-1])} "
+        "(satélite VIIRS): no suena ningún fuego."
+    )
+
+
+def synthesize_spatial(around: Surroundings, m: FireParameters, seed: int = 0) -> Signal:
+    """Convierte los incendios del entorno en 15 s de fuego en tres dimensiones, para auriculares."""
+    rng = np.random.default_rng(seed)
+    sr = SAMPLE_RATE
+    n = spatial.N_SAMPLES
+    t = np.arange(n) / sr
+    envelope = fade_envelope(n, sr)
+    space = spatial.Space(rng)
+    distance = _distances(around)
+    burning = around.values > 0
+    fires = [[mapping(float(megawatts)) for megawatts in step] for step in around.values]
+
+    def field(pick: Callable[[FireParameters], float]) -> Signal:
+        """Un parámetro de cada celda en cada paso; cero donde no arde nada."""
+        values: Signal = np.array([[pick(fire) for fire in step] for step in fires]) * burning
+        return values
+
+    # 1. Chasquidos: cada celda que arde crepita según su propia potencia
+    bursts = spatial.draw_grains(rng, field(lambda fire: fire.crackles_per_s))
+    here = (bursts.step, bursts.cell)
+    clicks = 1 + rng.poisson(field(lambda fire: fire.clicks_per_crackle)[here] - 1)
+    burst_amp = np.minimum(1 + rng.pareto(2.2, clicks.size), 6.0) / 3
+    burst_amp *= 0.6 * 10 ** (field(lambda fire: fire.crackle_db)[here] / 20)
+    burst_bearing = spatial.grain_bearings(rng, around, bursts.cell)
+    each = np.repeat(np.arange(clicks.size), clicks)  # a qué ráfaga pertenece cada chasquido
+    gaps = rng.exponential(0.006, each.size)
+    run = np.cumsum(gaps)
+    first = np.cumsum(clicks) - clicks
+    since_burst = run - np.repeat(run[first] - gaps[first], clicks)
+    onsets = np.clip(bursts.seconds[each] + since_burst - 0.002, 0, SECONDS)
+    amps = burst_amp[each] * rng.uniform(0.25, 1.0, each.size) * np.interp(onsets, t, envelope)
+    shapes = []
+    for seconds in CLICK_SECONDS:
+        tt = np.arange(int(7 * seconds * sr)) / sr
+        click = rng.standard_normal(tt.size) * np.exp(-tt / seconds)
+        shapes.append(spatial.grain_shape(click, m.crackle_hz / 2.5, m.crackle_hz * 2.5))
+    space.add_grains(onsets, amps, burst_bearing[each], distance[bursts.cell][each], shapes)
+
+    # 2. Chascazos: troncos que se parten, más raros, largos y leñosos
+    snaps = spatial.draw_grains(rng, field(lambda fire: fire.snaps_per_s))
+    amps = 0.35 * rng.uniform(0.5, 1.0, snaps.seconds.size) * np.interp(snaps.seconds, t, envelope)
+    shapes = []
+    for seconds, tone_hz in SNAPS:
+        tt = np.arange(int(7 * seconds * sr)) / sr
+        snap = 0.3 * np.sin(2 * np.pi * tone_hz * tt) + 0.7 * rng.standard_normal(tt.size)
+        shapes.append(spatial.grain_shape(snap * np.exp(-tt / seconds), 180, 4000))
+    space.add_grains(
+        snaps.seconds, amps, spatial.grain_bearings(rng, around, snaps.cell), distance[snaps.cell], shapes
+    )
+
+    # 3. Cuerpo: el aleteo grave de la llama, desde el sector donde arde
+    flame = _wobble(rng, n, m.flicker_hz, SECONDS + TAIL)
+    flutter = 0.4 + 0.6 * _wobble(rng, n, m.flutter_hz, SECONDS + TAIL) ** 2
+    life = (1 - m.flicker_depth * flame) * flutter * envelope
+    space.add_beds(
+        around,
+        (field(lambda fire: fire.roar_gain) / distance) ** 2,
+        lambda: 0.25 * np.sqrt(2) * spatial.unit_noise(rng, 2.0, 45, m.roar_hz),
+        life,
+    )
+
+    mix = space.render(m.reverb_s) * 10 ** (m.loudness_db / 20)
     return dsp.soft_limit(mix)

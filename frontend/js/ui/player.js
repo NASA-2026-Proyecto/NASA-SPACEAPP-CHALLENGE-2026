@@ -1,7 +1,7 @@
 import { createClipPlayer } from '../audio/clip-player.js';
 import { activeLayer } from '../core/layers.js';
 import { fetchSoundClip, fetchSoundReading } from '../data/sound-api.js';
-import { store } from '../state/app-store.js';
+import { store, setSpatialAudio } from '../state/app-store.js';
 import { createWaveform } from './waveform.js';
 
 const number = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 });
@@ -18,11 +18,16 @@ const TEXT = {
   silent: 'En este punto no suena nada.',
   notReady: 'Los datos de la NASA aún se están preparando. Inténtalo en unos segundos.',
   failed: 'No se pudo obtener el sonido. Inténtalo de nuevo.',
+  spatial: 'El sonido te rodea: el norte suena delante y arriba; el sur, detrás y abajo. Úsalo con auriculares.',
+  noSpatial: 'Esta capa aún no tiene sonido 3D: se oye en estéreo.',
 };
+
+const modeOf = (state) => (state.spatialAudio ? 'binaural' : 'stereo');
 
 // El sonido del punto seleccionado. Qué suena lo decide la capa activa (solo puede haber
 // una): sin capa, nada. Un clic en el globo pide el sonido a la API y lo reproduce; el
-// botón lo para o lo repite.
+// botón lo para o lo repite. El interruptor "3D con auriculares" pide el mismo punto en
+// tres dimensiones (o de vuelta en estéreo) y lo reproduce.
 export function initPlayer(root) {
   const engine = createClipPlayer();
   const playBtn = root.querySelector('[data-player-play]');
@@ -32,9 +37,12 @@ export function initPlayer(root) {
   const readValue = root.querySelector('[data-readout-value]');
   const readLevel = root.querySelector('[data-readout-level]');
   const description = root.querySelector('[data-player-description]');
+  const spatial = root.querySelector('[data-player-spatial]');
+  const spatialNote = root.querySelector('[data-player-spatial-note]');
   const wave = createWaveform(root.querySelector('[data-player-wave]'), engine);
 
   let layer = activeLayer(store.getState());
+  let mode = modeOf(store.getState()); // 'stereo' o 'binaural'
   let point = null; // último punto en el que se hizo clic
   let clip = null; // sonido ya descargado de ese punto con esa capa: { buffer }
   let pending = null; // AbortController de la petición en curso
@@ -51,6 +59,9 @@ export function initPlayer(root) {
       reading?.value === undefined ? '—' : `${number.format(reading.value)} ${reading.unit}`;
     readLevel.textContent = audible ? percent.format(reading.intensity) : '—';
     description.textContent = reading?.description ?? '';
+    // Con el 3D pedido, la lectura dice si la capa lo tiene
+    if (mode === 'stereo') spatialNote.textContent = '';
+    else spatialNote.textContent = reading && reading.mode !== mode ? TEXT.noSpatial : TEXT.spatial;
   }
 
   // Texto de reposo: qué hace falta para que suene algo
@@ -96,7 +107,7 @@ export function initPlayer(root) {
     sub.textContent = TEXT.reading;
     showReading(null);
     try {
-      const reading = await fetchSoundReading(layer.sound, point, controller.signal);
+      const reading = await fetchSoundReading(layer.sound, point, mode, controller.signal);
       if (!current()) return;
       showReading(reading);
       if (reading.status !== 'ok') {
@@ -125,12 +136,21 @@ export function initPlayer(root) {
     else load();
   });
   volume.addEventListener('input', () => engine.setVolume(Number(volume.value)));
+  spatial.addEventListener('change', () => setSpatialAudio(spatial.checked));
   window.addEventListener('pagehide', stop);
 
   store.subscribe((state) => {
     const nextLayer = activeLayer(state);
     const nextPoint = state.reading?.point ?? null;
+    const nextMode = modeOf(state);
 
+    if (nextMode !== mode) {
+      // Cambió entre estéreo y 3D: el mismo punto se pide y suena de la otra manera
+      mode = nextMode;
+      spatial.checked = state.spatialAudio;
+      if (layer && point && nextLayer === layer && nextPoint === point) load();
+      else showReading(null);
+    }
     if (nextLayer !== layer) {
       // Cambió la capa activa: lo que sonaba ya no corresponde a lo que se ve
       layer = nextLayer;

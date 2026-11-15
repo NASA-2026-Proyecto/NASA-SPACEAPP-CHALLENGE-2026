@@ -209,3 +209,21 @@ def test_numbers_and_dates_are_written_in_spanish():
     assert number(-2.5) == "-2,5"
     assert describe_stamp("2026-11-14T21:30Z") == "14 nov 2026, 21:30 UTC"
     assert describe_stamp("2026-01-02T00:00Z") == "2 ene 2026, 00:00 UTC"
+
+
+def test_wav_never_carries_invalid_values():
+    broken = np.array([[np.nan, np.inf, -np.inf, 0.5], [2.0, -2.0, 0.0, -0.5]])
+    with wave.open(io.BytesIO(dsp.wav_bytes(broken))) as wav:
+        assert (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) == (2, 2, 44_100)
+        pcm = np.frombuffer(wav.readframes(4), dtype="<i2").reshape(-1, 2).T
+    # Lo que no es un número es silencio; lo infinito y lo que se sale, el tope
+    assert pcm.tolist() == [[0, 32767, -32767, 16383], [32767, -32767, 0, -16383]]
+
+
+def test_band_gain_keeps_the_middle_and_halves_the_power_at_each_cut():
+    freqs = np.array([10.0, 100.0, 1000.0, 10_000.0, 20_000.0])
+    gain = dsp.band_gain(freqs, low_hz=100, high_hz=10_000)
+    assert gain[2] == pytest.approx(1.0, abs=1e-3)
+    assert gain[[1, 3]] == pytest.approx(np.sqrt(0.5), abs=1e-3)
+    assert gain[0] < 0.02 and gain[4] < 0.3
+    assert dsp.band_gain(freqs).tolist() == [1.0] * 5

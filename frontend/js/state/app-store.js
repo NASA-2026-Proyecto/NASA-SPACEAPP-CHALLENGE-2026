@@ -22,6 +22,7 @@ export const store = createStore({
   sceneProgress: 1,
   sceneInfo: {}, // por id de escena: { stamps } (los instantes de sus pasos) cuando está cargada
   reading: null, // lectura del punto seleccionado (js/data/point-reading.js)
+  spatialAudio: false, // sonido en tres dimensiones, para auriculares; si no, estéreo
 });
 
 // Solo puede haber una capa de datos activa: encender una apaga las demás. Así lo que se
@@ -64,4 +65,8 @@ export function setSceneInfo(sceneId, info) {
 
 export function setReading(reading) {
   store.setState({ reading });
+}
+
+export function setSpatialAudio(enabled) {
+  store.setState({ spatialAudio: enabled });
 }

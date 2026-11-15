@@ -114,8 +114,13 @@ def loudness_lufs(stereo: Signal, sr: int = SAMPLE_RATE) -> float:
 
 
 def wav_bytes(stereo: Signal, sr: int = SAMPLE_RATE) -> bytes:
-    """Codifica una señal (2, n) como archivo WAV PCM de 16 bits, en memoria."""
-    pcm = (np.clip(stereo.T, -1.0, 1.0) * 32767).astype("<i2")
+    """Codifica una señal (2, n) como archivo WAV PCM de 16 bits, en memoria.
+
+    Es el formato que abre cualquier reproductor. Lo que se salga de -1..1 se recorta y un
+    valor que no sea un número se escribe como silencio: al archivo nunca llega nada inválido.
+    """
+    safe = np.nan_to_num(stereo.T, nan=0.0, posinf=1.0, neginf=-1.0)
+    pcm = (np.clip(safe, -1.0, 1.0) * 32767).astype("<i2")
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav:
         wav.setnchannels(stereo.shape[0])
@@ -123,6 +128,18 @@ def wav_bytes(stereo: Signal, sr: int = SAMPLE_RATE) -> bytes:
         wav.setframerate(sr)
         wav.writeframes(pcm.tobytes())
     return buffer.getvalue()
+
+
+def band_gain(
+    freqs: Signal, low_hz: float | None = None, high_hz: float | None = None, order: int = 2
+) -> Signal:
+    """Ganancia con forma de Butterworth en esas frecuencias: paso alto en `low_hz`, bajo en `high_hz`."""
+    gain = np.ones_like(freqs)
+    if high_hz is not None:
+        gain /= np.sqrt(1 + (freqs / high_hz) ** (2 * order))
+    if low_hz is not None:
+        gain /= np.sqrt(1 + (low_hz / np.maximum(freqs, 1e-9)) ** (2 * order))
+    return gain
 
 
 def spectral_filter(
@@ -138,12 +155,7 @@ def spectral_filter(
     paso alto. `order` es la pendiente: 2 es suave (12 dB por octava), como la distancia.
     """
     n = signal.shape[-1]
-    freqs = np.fft.rfftfreq(n, 1 / sr)
-    gain = np.ones_like(freqs)
-    if high_hz is not None:
-        gain /= np.sqrt(1 + (freqs / high_hz) ** (2 * order))
-    if low_hz is not None:
-        gain /= np.sqrt(1 + (low_hz / np.maximum(freqs, 1e-9)) ** (2 * order))
+    gain = band_gain(np.fft.rfftfreq(n, 1 / sr), low_hz, high_hz, order)
     out: Signal = np.fft.irfft(np.fft.rfft(signal, axis=-1) * gain, n=n, axis=-1)
     return out
 

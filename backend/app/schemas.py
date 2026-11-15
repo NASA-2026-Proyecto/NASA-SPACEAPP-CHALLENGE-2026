@@ -13,6 +13,9 @@ from pydantic import BaseModel, Field
 type ProvenanceValue = str | int | float | list[str]
 # Un parámetro de un sonido: un número, un texto o una lista de números
 type SoundParameter = int | float | str | list[float]
+# stereo: el sonido de siempre, para altavoces o auriculares. binaural: en tres dimensiones,
+# solo para auriculares
+type SoundMode = Literal["stereo", "binaural"]
 
 
 class Health(BaseModel):
@@ -108,6 +111,10 @@ class SoundReading(BaseModel):
     sound: str = Field(description="Identificador del sonido (air, rain, fire)")
     scene_id: str = Field(description="Escena de la que sale el dato")
     version: str = Field(description="Versión de esa escena; forma parte de la URL del audio")
+    mode: SoundMode = Field(
+        description="Cómo suena: stereo o binaural (en tres dimensiones, para auriculares). Es stereo "
+        "aunque se pida binaural si el sonido aún no tiene versión en tres dimensiones"
+    )
     stamp_utc: str = Field(description="Instante del dato: el paso más reciente de la escena")
     lat: float = Field(description="Latitud del centro de la celda de la escena que se leyó")
     lon: float = Field(description="Longitud del centro de esa celda")

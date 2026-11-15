@@ -5,6 +5,10 @@ dato del punto en el paso más reciente y dice qué se va a oír, sin generar na
 `Sonifier.render()` genera el WAV. El audio es determinista (misma escena, mismo punto =
 mismo archivo), así que su URL lleva la versión de la escena y se puede cachear.
 
+Hay dos modos. En estéreo suena el dato del punto, en el paso más reciente. En binaural
+(tres dimensiones, para auriculares) suena todo el entorno del punto (`survey`), cada
+celda desde su rumbo y su distancia, a lo largo de todos los pasos de la serie.
+
 Generar un sonido cuesta en torno a un segundo de CPU y más de 100 MB de memoria, y la
 API es una sola instancia: por eso solo se generan unos pocos a la vez.
 """
@@ -18,13 +22,20 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from app.schemas import GridBlock, SoundParameter, SoundReading
+from app.schemas import GridBlock, SoundMode, SoundParameter, SoundReading
 from app.services.fire_scene import FireSource
 from app.services.pm25_scene import Pm25Source
 from app.services.precipitation_scene import PrecipitationSource
 from app.services.scenes import Scene, SceneStores
 from app.services.sound import air, fire, rain
-from app.services.sound.common import SECONDS, TAIL, PointSample, great_circle
+from app.services.sound.common import (
+    EARTH_RADIUS_KM,
+    SECONDS,
+    TAIL,
+    PointSample,
+    Surroundings,
+    great_circle,
+)
 from app.services.sound.dsp import Signal, wav_bytes
 
 BEARINGS = 32  # direcciones alrededor del punto: una cada 11,25°
@@ -59,6 +70,24 @@ class SoundParameters(Protocol):
 
 
 @dataclass(frozen=True)
+class Spatial[P: SoundParameters]:
+    """La versión en tres dimensiones de un sonido: suena el entorno del punto, no solo el punto.
+
+    Attributes:
+        mapping: Del entorno a los parámetros que dan el timbre del conjunto.
+        describe: Qué se oye, en palabras.
+        synthesize: El audio.
+        describe_absent: Qué se dice donde el dato es cero en todo el entorno y en todos
+            los pasos, y por tanto no suena nada; None si el sonido existe también así.
+    """
+
+    mapping: Callable[[Surroundings], P]
+    describe: Callable[[Surroundings, P], str]
+    synthesize: Callable[[Surroundings, P, int], Signal]
+    describe_absent: Callable[[Surroundings], str] | None = None
+
+
+@dataclass(frozen=True)
 class Sound[P: SoundParameters]:
     """Un sonido: de qué dato sale y cómo se convierte en audio.
 
@@ -70,12 +99,13 @@ class Sound[P: SoundParameters]:
         reach: Celdas a cada lado del punto que cuentan como "el punto"; se toma el
             valor más alto. 0 = solo su celda.
         near_km: Distancia a la que empieza a leerse el entorno, en cada dirección.
-        far_km: Distancia hasta la que se lee.
+        far_km: Distancia hasta la que se lee; en tres dimensiones, el radio del entorno.
         mapping: Del dato a los parámetros del sonido.
         describe: Qué se oye, en palabras.
         synthesize: El audio.
         describe_absent: Qué se dice donde el dato es cero y por tanto no suena nada;
             None si el sonido también existe con el dato a cero.
+        spatial: Su versión en tres dimensiones; None si aún no la tiene.
     """
 
     id: str
@@ -89,6 +119,7 @@ class Sound[P: SoundParameters]:
     describe: Callable[[PointSample, P], str]
     synthesize: Callable[[PointSample, P, int], Signal]
     describe_absent: Callable[[PointSample], str] | None = None
+    spatial: Spatial[P] | None = None
 
 
 SOUNDS: Mapping[str, Sound[Any]] = {
@@ -117,6 +148,7 @@ SOUNDS: Mapping[str, Sound[Any]] = {
             mapping=rain.mapping,
             describe=rain.describe,
             synthesize=rain.synthesize,
+            spatial=Spatial(rain.spatial_mapping, rain.describe_spatial, rain.synthesize_spatial),
         ),
         Sound(
             id="fire",
@@ -130,6 +162,12 @@ SOUNDS: Mapping[str, Sound[Any]] = {
             describe=fire.describe,
             synthesize=fire.synthesize,
             describe_absent=fire.describe_absent,
+            spatial=Spatial(
+                fire.spatial_mapping,
+                fire.describe_spatial,
+                fire.synthesize_spatial,
+                fire.describe_absent_spatial,
+            ),
         ),
     )
 }
@@ -183,6 +221,58 @@ def sample_point(sound: Sound[Any], scene: Scene, lat: float, lon: float) -> Poi
     )
 
 
+def survey(sound: Sound[Any], scene: Scene, lat: float, lon: float) -> Surroundings:
+    """Lee el entorno de un punto en todos los pasos de la escena: cada celda hasta `far_km`.
+
+    De cada celda se guarda su rumbo y su distancia desde el centro de la celda del
+    punto (por el círculo máximo) y su valor en cada paso; lo que no tiene dato cuenta
+    como cero.
+    """
+    manifest = scene.manifest
+    grid = manifest.grid
+    field = np.frombuffer(scene.files[f"{sound.species}.f32"], dtype="<f4").reshape(
+        manifest.time.steps, grid.n_lat, grid.n_lon
+    )
+    row, col = cell_of(grid, lat, lon)
+    centre_lat = grid.lat_min + row * grid.lat_step
+    centre_lon = grid.lon_min + col * grid.lon_step
+
+    # La ventana de celdas que puede caer dentro del radio. Los meridianos se juntan hacia
+    # los polos: el radio abarca más columnas cuanto más alta es la latitud, y todas si
+    # alcanza el polo
+    angle = sound.far_km / EARTH_RADIUS_KM
+    reach_rows = int(np.ceil(np.degrees(angle) / grid.lat_step))
+    widening = np.sin(angle) / max(float(np.cos(np.radians(centre_lat))), 1e-9)
+    spread = 180.0 if widening >= 1 else float(np.degrees(np.arcsin(widening)))
+    columns = min(2 * int(np.ceil(spread / grid.lon_step)) + 1, grid.n_lon)
+    rows = np.arange(max(row - reach_rows, 0), min(row + reach_rows, grid.n_lat - 1) + 1)
+    offsets = np.arange(columns) - columns // 2
+
+    here = np.radians(centre_lat)
+    there = np.radians(grid.lat_min + rows * grid.lat_step)[:, None]
+    east = np.radians(offsets * grid.lon_step)[None, :]
+    half_chord = np.sin((there - here) / 2) ** 2 + np.cos(here) * np.cos(there) * np.sin(east / 2) ** 2
+    km = 2 * EARTH_RADIUS_KM * np.arcsin(np.sqrt(half_chord))
+    bearing = np.degrees(
+        np.arctan2(
+            np.sin(east) * np.cos(there),
+            np.cos(here) * np.sin(there) - np.sin(here) * np.cos(there) * np.cos(east),
+        )
+    )
+    near = km <= sound.far_km
+    values = field[:, rows][:, :, (col + offsets) % grid.n_lon][:, near]
+
+    return Surroundings(
+        lat=round(centre_lat, COORDINATE_DECIMALS),
+        lon=round(centre_lon, COORDINATE_DECIMALS),
+        bearing=bearing[near] % 360,
+        km=km[near],
+        values=np.nan_to_num(values.astype(np.float64)),
+        stamps=tuple(manifest.time.stamps_utc),
+        far_km=sound.far_km,
+    )
+
+
 def _plain(value: float | int | str | tuple[int, ...]) -> SoundParameter:
     """Un parámetro en tipos de JSON, con los decimales justos."""
     if isinstance(value, tuple):
@@ -223,15 +313,17 @@ class Sonifier:
             raise UnknownSoundError(sound_id) from None
 
     def _reading(
-        self, sound: Sound[Any], scene: Scene, lat: float, lon: float
-    ) -> tuple[SoundReading, tuple[PointSample, Any] | None]:
-        """Lo que se sabe del sonido de un punto y, si suena, la muestra y sus parámetros."""
+        self, sound: Sound[Any], scene: Scene, lat: float, lon: float, mode: SoundMode
+    ) -> tuple[SoundReading, Callable[[int], Signal] | None]:
+        """Lo que se sabe del sonido de un punto y, si suena, la función que lo genera con una semilla."""
         sample = sample_point(sound, scene, lat, lon)
+        spatial = sound.spatial if mode == "binaural" else None
         reading = partial(
             SoundReading,
             sound=sound.id,
             scene_id=sound.scene_id,
             version=scene.version,
+            mode="stereo" if spatial is None else "binaural",
             stamp_utc=sample.stamp,
             lat=sample.lat,
             lon=sample.lon,
@@ -240,22 +332,42 @@ class Sonifier:
         if not np.isfinite(sample.value):
             return reading(status="no_data", description=NO_DATA_TEXT), None
         value = round(sample.value, 4)
-        if sound.describe_absent is not None and sample.value <= 0:
-            return reading(status="absent", value=value, description=sound.describe_absent(sample)), None
-        parameters = sound.mapping(sample.value)
+        audio = f"{sound.id}/{scene.version}.wav?lat={sample.lat}&lon={sample.lon}"
+
+        parameters: Any  # un dataclass de parámetros: cada sonido tiene el suyo
+        if spatial is None:
+            if sound.describe_absent is not None and sample.value <= 0:
+                return reading(status="absent", value=value, description=sound.describe_absent(sample)), None
+            parameters = sound.mapping(sample.value)
+            description = sound.describe(sample, parameters)
+            render = partial(sound.synthesize, sample, parameters)
+        else:
+            around = survey(sound, scene, lat, lon)
+            if spatial.describe_absent is not None and around.values.max() <= 0:
+                return reading(
+                    status="absent", value=value, description=spatial.describe_absent(around)
+                ), None
+            parameters = spatial.mapping(around)
+            description = spatial.describe(around, parameters)
+            render = partial(spatial.synthesize, around, parameters)
+            audio += "&mode=binaural"
+
         audible = reading(
             status="ok",
             value=value,
             intensity=round(parameters.intensity, 4),
-            description=sound.describe(sample, parameters),
+            description=description,
             parameters={key: _plain(item) for key, item in dataclasses.asdict(parameters).items()},
-            audio=f"{sound.id}/{scene.version}.wav?lat={sample.lat}&lon={sample.lon}",
+            audio=audio,
             duration_s=SECONDS + TAIL,
         )
-        return audible, (sample, parameters)
+        return audible, render
 
-    def read(self, sound_id: str, lat: float, lon: float) -> SoundReading:
+    def read(self, sound_id: str, lat: float, lon: float, mode: SoundMode = "stereo") -> SoundReading:
         """Qué suena en un punto, sin generar el audio.
+
+        Si se pide binaural y el sonido aún no lo tiene, la lectura es la del estéreo (y lo dice
+        en `mode`).
 
         Raises:
             UnknownSoundError: Si el sonido no existe.
@@ -265,10 +377,18 @@ class Sonifier:
         scene = self._scenes[sound.scene_id].get()
         if scene is None:
             raise SceneNotReadyError(sound.scene_id)
-        return self._reading(sound, scene, lat, lon)[0]
+        return self._reading(sound, scene, lat, lon, mode)[0]
 
-    def render(self, sound_id: str, version: str, lat: float, lon: float, seed: int = 0) -> bytes:
-        """El audio de un punto como archivo WAV (PCM de 16 bits, estéreo).
+    def render(
+        self,
+        sound_id: str,
+        version: str,
+        lat: float,
+        lon: float,
+        seed: int = 0,
+        mode: SoundMode = "stereo",
+    ) -> bytes:
+        """El audio de un punto como archivo WAV (PCM de 16 bits, dos canales).
 
         Args:
             sound_id: Identificador del sonido.
@@ -276,6 +396,7 @@ class Sonifier:
             lat: Latitud del punto.
             lon: Longitud del punto.
             seed: Semilla aleatoria; con la misma, el audio es idéntico.
+            mode: stereo o binaural (el estéreo, si el sonido aún no tiene binaural).
 
         Raises:
             UnknownSoundError: Si el sonido no existe.
@@ -286,13 +407,12 @@ class Sonifier:
         scene = self._scenes[sound.scene_id].scene(version)
         if scene is None:
             raise NoAudioError(f"versión {version} no disponible")
-        _, audible = self._reading(sound, scene, lat, lon)
-        if audible is None:
+        _, synthesize = self._reading(sound, scene, lat, lon, mode)
+        if synthesize is None:
             raise NoAudioError("en ese punto no suena nada")
         if not self._slots.acquire(blocking=False):
             raise BusyError(sound_id)
         try:
-            sample, parameters = audible
-            return wav_bytes(sound.synthesize(sample, parameters, seed))
+            return wav_bytes(synthesize(seed))
         finally:
             self._slots.release()

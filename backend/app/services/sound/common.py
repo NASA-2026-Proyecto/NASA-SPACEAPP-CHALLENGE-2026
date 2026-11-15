@@ -39,6 +39,31 @@ class PointSample:
     stamp: str
 
 
+@dataclass(frozen=True)
+class Surroundings:
+    """El entorno de un punto a lo largo de la serie: lo que necesita el sonido en tres dimensiones.
+
+    Attributes:
+        lat: Latitud del punto, grados norte.
+        lon: Longitud del punto, grados este.
+        bearing: Rumbo de cada celda del entorno desde el punto, en grados desde el norte
+            y en sentido horario.
+        km: Distancia de cada celda al punto; 0 es la celda del propio punto.
+        values: El dato de cada celda en cada paso, con forma [paso, celda] y del paso
+            más antiguo al más reciente. Donde la fuente no tiene dato vale 0.
+        stamps: Instante de cada paso, como en los manifiestos (2026-11-14T21:30Z).
+        far_km: Distancia hasta la que se leyó el entorno.
+    """
+
+    lat: float
+    lon: float
+    bearing: Signal
+    km: Signal
+    values: Signal
+    stamps: tuple[str, ...]
+    far_km: float
+
+
 def compass(bearing_deg: float) -> str:
     """Nombre del punto cardinal más cercano de los ocho (0 = norte, sentido horario)."""
     return COMPASS[round(bearing_deg / 45) % 8]
@@ -90,3 +115,20 @@ def describe_stamp(stamp: str) -> str:
     """Un instante de manifiesto (2026-11-14T21:30Z) dicho en palabras: 14 nov 2026, 21:30 UTC."""
     moment = datetime.strptime(stamp, "%Y-%m-%dT%H:%MZ")
     return f"{moment.day} {MONTHS[moment.month - 1]} {moment.year}, {moment:%H:%M} UTC"
+
+
+def describe_journey(around: Surroundings) -> str:
+    """Cómo se oye el sonido en tres dimensiones y qué tramo de la serie recorre."""
+    return (
+        "Sonido 3D para auriculares: el norte suena delante y arriba, el sur detrás y abajo, "
+        "y lo lejano, más flojo y apagado. "
+        f"Recorre los {len(around.stamps)} pasos de la serie, del {describe_stamp(around.stamps[0])} "
+        f"al {describe_stamp(around.stamps[-1])}, y termina en el más reciente."
+    )
+
+
+def describe_place(around: Surroundings, cell: int) -> str:
+    """Dónde queda una celda del entorno respecto al punto, en palabras."""
+    if around.km[cell] == 0:
+        return "en el propio punto"
+    return f"a unos {number(float(around.km[cell]), 0)} km hacia el {compass(float(around.bearing[cell]))}"
