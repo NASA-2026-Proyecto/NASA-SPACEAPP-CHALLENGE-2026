@@ -29,7 +29,9 @@ frontend/                 Static site = nginx web root (relative paths everywher
     catalog/scenes.js     Scene catalog (SCENES): id, dataUrl (static folder or API), species (id, label, color), `live`
     data/scene-data.js    loadScene(baseUrl) (manifest + .f32, checks size and sha256), sampleAt() (interpolated, for sound), cellValueAt() (exact cell, for the popup), createResampler()
     core/layers.js        isSceneLayer(), isLayerAvailable()
-    api/client.js         apiGet()/getPoint(): fetch to relative /api, ApiError, 8 s timeout, AbortSignal
+    api/client.js         apiGet()/getPoint(): fetch to relative /api, ApiError, 8 s timeout, AbortSignal (currently unused)
+    data/scene-cache.js   getScene(sceneId): one shared download per scene
+    data/point-reading.js readPm25(), readAerosols(), levelOf(): the reading of a clicked point
     pages/                Page entry points (landing.js, explorer.js); explorer.js wires the UI and the click → /api/point flow
     map/                  globe-map.js (createGlobeMap → {map, flyTo, isOnGlobe, showPopup, destroy}), series-layer.js (scene → canvas → raster layer), gibs.js,
                           night-lights.js, land-dots.js, hover-glow.js, auto-spin.js
@@ -87,7 +89,7 @@ A **scene** is how gridded data reaches the browser, whatever its source. It was
 
 There are two scenes, both built by the backend at runtime and wired in `app/main.py default_scenes()`:
 
-- `pm25-latest`, the **field**: the newest frame of the EIC daily visualization PM2.5 (SVS 5151, GEOS-CF). Colours are converted back to µg/m³ with the page's colour bar (log scale 0.4–409.6), 2×2 pixel blocks are averaged to a 1024 × 512 grid, coastlines and borders are removed by shape (bright features under 3 px) and filled, and the logo and date boxes stay NaN. One step; its stamp is NASA's publication time, because the frame's own hour is only printed on the image. The manifest carries `scale: {kind: "log", min, max, ramp}` with NASA's ramp colours, and `series-layer.js` paints it with that ramp (transparent in clean air).
+- `pm25-latest`, the **field**: the newest frame of the EIC daily visualization PM2.5 (SVS 5151, GEOS-CF). Colours are converted back to µg/m³ with the page's colour bar (log scale 0.4–409.6), 2×2 pixel blocks are averaged to a 512 × 256 grid, coastlines and borders are removed by shape (bright features under 3 px) and filled, and the logo and date boxes stay NaN. Eight steps 3 hours apart; the last stamp is NASA's publication time (the spacing between steps is exact, the absolute hour is not, because each frame's own hour is only printed on the image). The manifest carries `scale: {kind: "log", min, max, ramp}` with NASA's ramp colours, and `series-layer.js` paints it with that ramp (transparent in clean air).
 - `aerosol-latest`, the **probe** source: GEOS-FP species, described next.
 
 In the panel the Aerosoles layer has one button per species across both scenes (`config.js`: `scenes`, each species tagged with its `sceneId`); **PM2.5 is first and the default**. A scene is fetched the first time one of its species is selected with the layer on, and each scene gets its own map layer (`aerosol-<sceneId>`). The panel note shows the source and date of what is on screen (`sceneInfo` in the store).
@@ -101,17 +103,37 @@ Flow for the live aerosol scene (`aerosol-latest`):
 
 Rules: do not commit scene data to git (it is built at runtime, or by the offline tools into git-ignored `data/`). New gridded sources should become new scenes in this same format, not new formats.
 
-### Click → API flow (explorer)
+### Click → reading → popup and sound (explorer)
 
-`explorer.js initPointProbe(globe)`: on `map.on('click')` it
-1. ignores the click if `!globe.isOnGlobe(event)`;
-2. calls `event.lngLat.wrap()`;
-3. rounds to 5 decimals;
-4. aborts the previous request (AbortController);
-5. calls `card.pending()` + `globe.showPopup()`;
-6. awaits `getPoint()` → `card.success(reply)` or `card.error(point, msg)`.
+No server round trip per click: values are read locally from the scenes.
 
-The popup is a single reused `maplibregl.Popup` (`closeOnClick: false`, `focusAfterOpen: false`, class `ej-popup`). Card text is set via `textContent` only.
+`explorer.js initPointProbe(globe)`, on `map.on('click')`:
+1. ignores the click if `!globe.isOnGlobe(event)`; calls `event.lngLat.wrap()`; rounds to 5 decimals;
+2. builds a **reading** (`data/point-reading.js`): `{point, pm25: {status, value, position, level, stamp}, live: {status, species[{id,label,color,value,share}], total, trend{direction, change, hours}, stamp}}`, with both parts `loading`;
+3. asks `data/scene-cache.js getScene()` for `pm25-latest` and `aerosol-latest` (one shared download per scene, also used by the map layers; a failed request is not cached, so the next click retries). Each part fills in on its own: if one source fails the other still shows;
+4. on every update renders the popup card (`ui/point-card.js`, `textContent` only) and stores the reading with `setReading()`; a later click wins (`latest` guard).
+
+Roles are fixed: **PM2.5 from the EIC visualization says how much** (µg/m³, plus a level word from its position on NASA's log scale: it is relative to that scale, not an air-quality index); **GEOS-FP says what it is made of** (share of each species' optical depth at the newest step) **and where it is going** (change of the 5-species total over the available steps; beyond ±10% is "en aumento"/"en descenso").
+
+Sound (`ui/player.js` + `audio/audio-engine.js`): the player follows `state.reading`. One datum drives one parameter:
+
+| Data | Source | Sound parameter |
+|---|---|---|
+| PM2.5 position on NASA's scale (0..1) | EIC scene | pitch (110 Hz × 2^(3v)) and level |
+| species shares | GEOS-FP scene | timbre: gain of one voice per species (sea salt = pure sine, sulfate = bright, brown carbon = hollow/odd harmonics, black carbon = rough, dust = beating pair) |
+| trend direction | GEOS-FP scene | a three-note cue (rising, falling or repeated) when the data for a point arrives or playback starts |
+
+Without live data a neutral voice plays (plainer but still correct). Until the first click, or where the EIC image has no data (NaN under NASA's logo and date boxes), the simulated demo signal plays and the top chip reads "Modo demostración" instead of "Datos de la NASA". The card is shown in the corner panel described below.
+
+`GET /api/point` still exists (echoes coordinates) but the frontend no longer calls it; `api/client.js` is unused for now.
+
+### Animation and the point card
+
+- **Both scenes are series of `SCENE_STEPS` steps (default 8) spaced 3 hours**, so each covers the last 21 hours: GEOS-FP's last 8 steps, and for PM2.5 one hourly frame out of every 3, ending at the newest (`Pm25Source(steps, frame_spacing=3, factor=4)` → 512 × 256 grid, about 4 MB; the aerosol scene is about 8 MB).
+- `map/scene-animation.js` is a clock that loops 0 → 1 in 9 s, holds 2.2 s on the newest step and restarts (20 fps). `globe-map.js` runs it while `state.scenePlaying` is true and a scene layer is visible, and calls `series.setProgress(p)` on every layer directly; the store only gets `sceneProgress` in 24 coarse ticks, for the panel label. Pausing returns to the newest step. `scenePlaying` starts false when the user prefers reduced motion.
+- `series-layer.js` paints each step once into its own canvas (cache per species) and cross-fades the two neighbouring steps with canvas compositing (`lighter` with weights), so a frame of animation costs two `drawImage` calls, not a per-pixel loop.
+- The panel shows a pause/play button and a label ("Últimas 21 h · 8 h antes"); it has no `aria-live` because it changes several times per second.
+- **The point card is not a map popup.** It lives in a fixed panel in the bottom-right corner (`.ej-point-dock`, created in `explorer.js`) so it never covers the globe; the clicked point gets a `maplibregl.Marker` (`globe.showMarker()` / `hideMarker()`). The card and the sound always describe the newest step, whatever the animation is showing; the trend covers all the steps of the scene.
 
 ## Docker
 
@@ -179,9 +201,8 @@ The Compose project name is `earth-jukebox` (containers `earth-jukebox-backend-1
 ## Known issues and tech debt
 
 - `frontend/assets/images/earth-water.png` is 16200×8100 (4.7 MB) but only used downscaled to 720×360, on both pages. Decoding it takes about 525 MB of RAM, which is a risk on mobile. A 1440×720 version would do.
-- The sonification player uses `createSimulatedSource()`; it is not yet connected to scene data.
-- The click popup only shows coordinates (`/api/point` echoes them).
-- No time control: `sceneStep` / `scenePlaying` exist in the store but nothing in the UI changes them.
+- Sound: no spatial sweep around the point yet (notebooks 03/04 of the exploration repo have the idea), and playback does not start by itself on click (the user presses play).
+- `/api/point`, `api/client.js` and the `.ej-point__message` CSS are leftovers from the first click prototype.
 - NASA is a runtime dependency: if GEOS-FP is down when the backend starts, the aerosol layer stays empty until it recovers (no on-disk copy of the last scene). The in-memory scene is per process, so a serverless host would rebuild it on every cold start.
 - GEOS-FP "assim" data runs about 12 hours behind real time.
 - `gibs.js` is currently unused (no layer has a GIBS `source`); it will be needed again for fires.
@@ -206,7 +227,7 @@ Design principle: the **EIC daily visualization is the field** (complete global 
 - **Phase B, bring in the daily visualization: DONE** (see "Data scenes"). What was planned:
   1. Backend: a `pm25-latest` scene that decodes the newest SVS 5151 frame (colour → value, fill gaps under logo/timestamp/coastlines) into the scene format. Reuse `SceneStore`; port the decoding from `D:\nasa-sonification\explore\nasa_sources.py` (`gradient_from_colour_bar`, `invert_gradient`). Adds Pillow.
   2. Globe: draw it through `series-layer.js` with a colour-ramp mode (NASA's ramp, alpha by value). **Decided (option B):** the species buttons stay and gain a first "PM2.5" button (default) that shows the EIC scene; the other five still draw that live GEOS-FP species.
-- **Phase C, live data at a point:**
+- **Phase C, live data at a point: DONE** (see "Click → reading → popup and sound"). What was planned:
   1. Popup: PM2.5 value, species breakdown and trend over the last 3 steps, read locally from the scenes.
   2. Sound: replace the simulated source. PM2.5 → pitch and level; species shares → timbre; trend → a short cue. Mapping ideas are in the notebooks 03/04 of the exploration repo.
 - **Phase D, fires:** "Incendios" loads the GIBS VIIRS tiles; live numbers near the click need a FIRMS key.

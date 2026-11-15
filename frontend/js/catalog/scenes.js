@@ -2,7 +2,6 @@
 // sonido muestrea. `dataUrl` puede apuntar a archivos estáticos o, como aquí, a la API,
 // que prepara cada escena con los últimos datos de la NASA.
 //
-//   live        -> se muestra siempre el paso más reciente
 //   source      -> de dónde vienen los datos, en corto (se enseña en el panel)
 //   stampLabel  -> qué significa la fecha del manifiesto ("dato del" / "publicado el")
 export const SCENES = [
@@ -11,7 +10,6 @@ export const SCENES = [
     id: 'pm25-latest',
     title: 'Partículas PM2.5: visualización diaria del EIC',
     dataUrl: 'api/scenes/pm25-latest',
-    live: true,
     source: 'Visualización diaria del EIC (modelo GEOS-CF)',
     stampLabel: 'publicada el',
     reference: {
@@ -19,14 +17,13 @@ export const SCENES = [
       credit: 'NASA Scientific Visualization Studio',
       url: 'https://svs.gsfc.nasa.gov/5151/',
     },
-    species: [{ id: 'pm25', label: 'PM2.5', color: '#E8862E' }],
+    species: [{ id: 'pm25', label: 'EIC PM 2.5', color: '#E8862E' }],
   },
   {
     // API casi en tiempo real: de qué están hechas las partículas
     id: 'aerosol-latest',
     title: 'Aerosoles globales: últimos pasos del modelo GEOS-FP',
     dataUrl: 'api/scenes/aerosol-latest',
-    live: true,
     source: 'Casi en tiempo real (modelo GEOS-FP)',
     stampLabel: 'dato del',
     reference: {

@@ -23,10 +23,10 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 | 3D globe with NASA Blue Marble basemap and night lights | ✅ Working |
 | Aerosol layer, default view: the EIC daily visualization *Particulate Matter (PM) 2.5*, decoded from NASA's image back into values and drawn with NASA's own colour scale | ✅ Working |
 | Aerosol layer, alternative views: near-real-time NASA GEOS-FP model data (five aerosol types, refreshed every 3 hours) | ✅ Working |
-| Sonification player (pitch, level, live waveform) | ✅ Working, with a **simulated** signal |
-| Click on the globe → coordinates sent to the API → reply shown on the globe | ✅ Working |
+| The aerosol layer is animated: it loops through the last 21 hours of data, with a pause button | ✅ Working |
+| Click on the globe → PM2.5 at that point (EIC visualization), aerosol composition and 6-hour trend (GEOS-FP) | ✅ Working |
+| Sonification of the clicked point: PM2.5 sets pitch and level, composition sets the timbre, the trend plays a short cue | ✅ Working (a simulated signal plays until a point is selected) |
 | API: `/api/health`, `/api/point`, `/api/scenes` (`pm25-latest`, `aerosol-latest`) | ✅ Working |
-| Real values at the clicked point, in the popup and in the sound | 🔜 Next |
 | Wildfires and precipitation layers on the globe | 🔜 Pending |
 
 ## Architecture
@@ -204,8 +204,8 @@ Environment variables are read from `.env` (see [.env.example](.env.example)):
 | `FRONTEND_PORT` | `8080` | Compose | Host port where the app is published |
 | `LOG_LEVEL` | `info` | backend | Uvicorn log level: `critical`, `error`, `warning`, `info` or `debug` |
 | `CORS_ORIGINS` | `[]` | backend | JSON list of origins allowed to call the API directly. Not needed when going through nginx. |
-| `SCENE_STEPS` | `3` | backend | How many 3-hour GEOS-FP steps the aerosol scene holds |
-| `SCENE_WARMUP` | `true` | backend | Start fetching the aerosol scene at startup instead of on the first request |
+| `SCENE_STEPS` | `8` | backend | How many 3-hour steps each scene holds (8 = the last day, which the globe plays in a loop) |
+| `SCENE_WARMUP` | `true` | backend | Start fetching the scenes at startup instead of on the first request |
 | `PORT` | `8000` | backend image | API port inside the container (some platforms set it automatically) |
 | `BACKEND_URL` | `http://backend:8000` | frontend image | Where nginx forwards `/api/*` |
 

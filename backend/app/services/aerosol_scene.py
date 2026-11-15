@@ -28,7 +28,7 @@ SPECIES: dict[str, tuple[str, float]] = {
 class AerosolSource:
     scene_id = "aerosol-latest"
 
-    def __init__(self, client: GeosFpClient, steps: int = 3) -> None:
+    def __init__(self, client: GeosFpClient, steps: int = 8) -> None:
         self._client = client
         self._steps = steps
 

@@ -63,10 +63,14 @@ function buildRampTable(stops) {
 //   id       -> id de la fuente y la capa en el mapa
 //   layerId  -> capa del panel a la que pertenece (visibilidad, opacidad y especie elegida)
 //   species  -> especies de esta escena; la capa solo se ve si la elegida es una de ellas
-//   live     -> true: se muestra siempre el paso más reciente de la escena
-export function createSeriesLayer(map, { id, layerId, scene, species, live = false, beforeId }) {
+//
+// La escena se recorre en el tiempo con setProgress(0..1): 0 es el paso más antiguo y 1
+// el más reciente. Cada paso se pinta una sola vez en su propio lienzo; entre dos pasos
+// se funden esos dos lienzos, que es barato y permite animar con fluidez.
+export function createSeriesLayer(map, { id, layerId, scene, species, beforeId }) {
   const geometry = buildGeometry(scene.grid);
   const { width, height } = geometry;
+  const lastStep = scene.time.steps - 1;
 
   const canvas = document.createElement('canvas');
   canvas.id = `${id}-canvas`;
@@ -100,7 +104,13 @@ export function createSeriesLayer(map, { id, layerId, scene, species, live = fal
   const field = new Float32Array(width * height);
   const palette = buildPalette(species);
   const rampTables = new Map();
-  let current = { speciesId: null, step: null };
+
+  // Pasos ya pintados de la especie que se está viendo: índice de paso -> lienzo
+  let stepCache = { speciesId: null, canvases: new Map() };
+  let visible = false;
+  let speciesId = null;
+  let progress = 1;
+  let drawn = { speciesId: null, position: null };
 
   map.addSource(id, {
     type: 'canvas',
@@ -125,9 +135,9 @@ export function createSeriesLayer(map, { id, layerId, scene, species, live = fal
   );
 
   // Un solo color por especie: más claro y más opaco cuanto mayor es el valor.
-  function paintTint(speciesId) {
-    const scale = scene.manifest.species[speciesId].display_scale_max;
-    const { base, dark, light } = palette.get(speciesId);
+  function paintTint(id) {
+    const scale = scene.manifest.species[id].display_scale_max;
+    const { base, dark, light } = palette.get(id);
     const data = image.data;
     for (let r = 0; r < height; r += 1) {
       for (let c = 0; c < width; c += 1) {
@@ -154,9 +164,9 @@ export function createSeriesLayer(map, { id, layerId, scene, species, live = fal
 
   // Escala logarítmica con la rampa de colores original (p. ej. la barra de la NASA).
   // Los huecos (NaN: donde la imagen de origen no tenía dato) quedan transparentes.
-  function paintRamp(speciesId, scale) {
-    if (!rampTables.has(speciesId)) rampTables.set(speciesId, buildRampTable(scale.ramp));
-    const table = rampTables.get(speciesId);
+  function paintRamp(id, scale) {
+    if (!rampTables.has(id)) rampTables.set(id, buildRampTable(scale.ramp));
+    const table = rampTables.get(id);
     const logMin = Math.log(scale.min);
     const logSpan = Math.log(scale.max) - logMin;
     const data = image.data;
@@ -180,25 +190,60 @@ export function createSeriesLayer(map, { id, layerId, scene, species, live = fal
     }
   }
 
-  function paint(speciesId, step) {
-    resample(speciesId, step, field);
-    const scale = scene.manifest.species[speciesId].scale;
-    if (scale?.kind === 'log' && scale.ramp) paintRamp(speciesId, scale);
-    else paintTint(speciesId);
-    context.putImageData(image, 0, 0);
+  // Lienzo con un paso exacto de una especie (se pinta la primera vez y se guarda).
+  function stepCanvas(id, step) {
+    if (stepCache.speciesId !== id) stepCache = { speciesId: id, canvases: new Map() };
+    let cached = stepCache.canvases.get(step);
+    if (!cached) {
+      resample(id, step, field);
+      const scale = scene.manifest.species[id].scale;
+      if (scale?.kind === 'log' && scale.ramp) paintRamp(id, scale);
+      else paintTint(id);
+      cached = document.createElement('canvas');
+      cached.width = width;
+      cached.height = height;
+      cached.getContext('2d').putImageData(image, 0, 0);
+      stepCache.canvases.set(step, cached);
+    }
+    return cached;
+  }
+
+  function draw() {
+    if (!visible) return;
+    const position = progress * lastStep;
+    if (drawn.speciesId === speciesId && drawn.position === position) return;
+    drawn = { speciesId, position };
+
+    const s0 = Math.floor(position);
+    const s1 = Math.min(s0 + 1, lastStep);
+    const mix = position - s0;
+    context.clearRect(0, 0, width, height);
+    if (mix === 0 || s1 === s0) {
+      context.globalCompositeOperation = 'source-over';
+      context.globalAlpha = 1;
+      context.drawImage(stepCanvas(speciesId, s0), 0, 0);
+      return;
+    }
+    // "lighter" suma los dos pasos con sus pesos: es la interpolación lineal exacta
+    context.globalCompositeOperation = 'lighter';
+    context.globalAlpha = 1 - mix;
+    context.drawImage(stepCanvas(speciesId, s0), 0, 0);
+    context.globalAlpha = mix;
+    context.drawImage(stepCanvas(speciesId, s1), 0, 0);
   }
 
   function sync(state) {
-    const speciesId = state.species[layerId];
-    const visible = Boolean(state.layers[layerId]) && palette.has(speciesId);
+    speciesId = state.species[layerId];
+    visible = Boolean(state.layers[layerId]) && palette.has(speciesId);
     map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
     map.setPaintProperty(id, 'raster-opacity', state.opacity[layerId]);
-    if (!visible) return;
+    draw();
+  }
 
-    const step = live ? scene.time.steps - 1 : state.sceneStep;
-    if (speciesId === current.speciesId && step === current.step) return;
-    current = { speciesId, step };
-    paint(speciesId, step);
+  // 0 = paso más antiguo de la escena, 1 = el más reciente
+  function setProgress(value) {
+    progress = Math.min(1, Math.max(0, value));
+    draw();
   }
 
   function destroy() {
@@ -207,5 +252,5 @@ export function createSeriesLayer(map, { id, layerId, scene, species, live = fal
     canvas.remove();
   }
 
-  return { sync, destroy };
+  return { sync, setProgress, isVisible: () => visible, destroy };
 }

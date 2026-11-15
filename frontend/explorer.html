@@ -40,7 +40,7 @@
 
     <div class="ej-chip" role="status">
       <span class="ej-chip__icon" data-icon="signal" aria-hidden="true"></span>
-      Modo demostración
+      <span id="mode-chip-text">Modo demostración</span>
     </div>
 
     <div class="ej-navbar__actions">
@@ -89,8 +89,8 @@
     <div class="ej-panel__header">
       <span class="ej-panel__badge ej-panel__badge--violet" data-icon="signal" aria-hidden="true"></span>
       <div class="ej-panel__heading">
-        <h2 id="signal-title" class="ej-panel__title">Señal de demostración</h2>
-        <p class="ej-player__sub">Índice simulado - aún faltan datos</p>
+        <h2 id="signal-title" class="ej-panel__title" data-player-title>Señal de demostración</h2>
+        <p class="ej-player__sub" data-player-sub>Índice simulado: haz clic en el globo</p>
       </div>
       <button class="ej-icon-btn" type="button" aria-expanded="true" aria-controls="signal-body" data-panel-toggle
         data-panel-name="señal" aria-label="Plegar panel de señal">

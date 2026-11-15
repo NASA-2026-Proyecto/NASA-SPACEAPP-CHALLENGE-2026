@@ -1,7 +1,7 @@
 import * as maplibregl from 'https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs';
 import { LAYERS } from '../config.js';
 import { readCssToken } from '../core/css-tokens.js';
-import { store, setSceneInfo } from '../state/app-store.js';
+import { store, setSceneInfo, setSceneProgress } from '../state/app-store.js';
 import { startAutoSpin } from './auto-spin.js';
 import { buildGibsSource } from './gibs.js';
 import { reducedMotionQuery } from '../core/motion.js';
@@ -10,8 +10,9 @@ import { addLandDots, DOTS_SOURCE, DOTS_LAYER } from './land-dots.js';
 import { createHoverGlow } from './hover-glow.js';
 import { findScene } from '../catalog/scenes.js';
 import { isSceneLayer, sceneIdOf } from '../core/layers.js';
-import { loadScene } from '../data/scene-data.js';
+import { getScene } from '../data/scene-cache.js';
 import { createSeriesLayer } from './series-layer.js';
+import { createSceneAnimation } from './scene-animation.js';
 
 
 const STYLE = 'https://tiles.openfreemap.org/styles/dark';
@@ -20,6 +21,7 @@ const PLACES = { spain: { center: [-3.7, 40.4], zoom: 5.2 } };
 const LOAD_TIMEOUT_MS = 20000;
 const ON_GLOBE_TOLERANCE_PX = 2;
 const SCENE_RETRY_MS = 5000;
+const PROGRESS_TICKS = 24; // saltos con los que el avance de la animación llega a la interfaz
 
 const BASEMAP_ID = 'nasa-blue-marble';
 const BASEMAP_TILES =
@@ -157,19 +159,18 @@ export async function createGlobeMap({ container }) {
       if (!state.layers[layer.id] || !sceneId || requestedScenes.has(sceneId)) continue;
       requestedScenes.add(sceneId);
       const entry = findScene(sceneId);
-      loadScene(entry.dataUrl)
+      getScene(sceneId)
         .then((scene) => {
-          seriesLayers.push(
-            createSeriesLayer(map, {
-              id: `${layer.id}-${sceneId}`,
-              layerId: layer.id,
-              scene,
-              species: entry.species,
-              live: entry.live,
-              beforeId,
-            })
-          );
-          setSceneInfo(sceneId, { stamp: scene.time.stamps_utc.at(-1) });
+          const series = createSeriesLayer(map, {
+            id: `${layer.id}-${sceneId}`,
+            layerId: layer.id,
+            scene,
+            species: entry.species,
+            beforeId,
+          });
+          series.setProgress(sceneProgress);
+          seriesLayers.push(series);
+          setSceneInfo(sceneId, { stamps: scene.time.stamps_utc });
         })
         .catch((error) => {
           console.warn(`[mapa] Sin datos para la escena "${sceneId}"; se reintentará:`, error);
@@ -183,11 +184,24 @@ export async function createGlobeMap({ container }) {
     }
   }
 
+  // Animación: las escenas visibles recorren sus pasos en bucle (del más antiguo al más
+  // reciente). Las capas reciben cada fotograma directamente; al store solo llega el
+  // avance a saltos, para el rótulo del panel.
+  let sceneProgress = 1;
+  const animation = createSceneAnimation((progress) => {
+    sceneProgress = progress;
+    for (const series of seriesLayers) series.setProgress(progress);
+    const coarse = Math.round(progress * PROGRESS_TICKS) / PROGRESS_TICKS;
+    if (coarse !== store.getState().sceneProgress) setSceneProgress(coarse);
+  });
+
   const sync = (state) => {
     syncLayers(map, state);
     syncAppearance(state);
     loadScenesOnDemand(state);
     for (const series of seriesLayers) series.sync(state);
+    if (state.scenePlaying && seriesLayers.some((series) => series.isVisible())) animation.start();
+    else animation.stop();
   };
   sync(store.getState());
 
@@ -206,9 +220,7 @@ export async function createGlobeMap({ container }) {
   const unsubscribe = store.subscribe(sync);
   const stopSpin = startAutoSpin(map);
 
-  // Un único popup reutilizable. closeOnClick: false porque es el propio clic en el
-  // mapa el que lo mueve; focusAfterOpen: false para no robar el foco en cada clic.
-  let popup = null;
+  let marker = null;
 
   return {
     map,
@@ -225,22 +237,24 @@ export async function createGlobeMap({ container }) {
       const back = map.project(lngLat);
       return Math.hypot(back.x - point.x, back.y - point.y) <= ON_GLOBE_TOLERANCE_PX;
     },
-    showPopup(lngLat, content) {
-      popup ??= new maplibregl.Popup({
-        className: 'ej-popup',
-        closeOnClick: false,
-        focusAfterOpen: false,
-        maxWidth: '280px',
-        offset: 12,
-      });
-      popup.setLngLat(lngLat).setDOMContent(content);
-      if (!popup.isOpen()) popup.addTo(map);
+    // Marca el punto seleccionado sin tapar el globo (su ficha va en una esquina)
+    showMarker(lngLat) {
+      if (!marker) {
+        const element = document.createElement('div');
+        element.className = 'ej-marker';
+        marker = new maplibregl.Marker({ element });
+      }
+      marker.setLngLat(lngLat).addTo(map);
+    },
+    hideMarker() {
+      marker?.remove();
     },
     destroy() {
       unsubscribe();
       hoverGlow?.destroy();
       stopSpin();
-      popup?.remove();
+      marker?.remove();
+      animation.stop();
       sceneRetryTimers.forEach(clearTimeout);
       seriesLayers.forEach((series) => series.destroy());
       map.remove();

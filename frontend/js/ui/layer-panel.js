@@ -1,7 +1,13 @@
 import { LAYERS } from '../config.js';
 import { findScene } from '../catalog/scenes.js';
 import { isLayerAvailable, sceneIdOf } from '../core/layers.js';
-import { store, setLayerVisible, setLayerOpacity, setLayerSpecies } from '../state/app-store.js';
+import {
+  store,
+  setLayerVisible,
+  setLayerOpacity,
+  setLayerSpecies,
+  setScenePlaying,
+} from '../state/app-store.js';
 import { icon } from './icons.js';
 
 const STAMP_FORMAT = new Intl.DateTimeFormat('es-ES', {
@@ -12,6 +18,18 @@ const STAMP_FORMAT = new Intl.DateTimeFormat('es-ES', {
   timeZone: 'UTC',
 });
 
+const toDate = (stamp) => new Date(stamp.replace('Z', ':00Z'));
+
+// Qué tramo recorre la animación y por dónde va. Cadena vacía si no hay nada que animar.
+function animationNote(layer, state) {
+  const info = state.sceneInfo[sceneIdOf(layer, state.species[layer.id])];
+  if (!info || !state.layers[layer.id] || info.stamps.length < 2) return '';
+  const span = Math.round((toDate(info.stamps.at(-1)) - toDate(info.stamps[0])) / 3_600_000);
+  if (!state.scenePlaying) return `Últimas ${span} h · en pausa en el último dato`;
+  const back = Math.round((1 - state.sceneProgress) * span);
+  return `Últimas ${span} h · ${back === 0 ? 'último dato' : `${back} h antes`}`;
+}
+
 // Qué se está viendo y de cuándo es: cada fuente tiene su propia fecha.
 function sceneNote(layer, state) {
   const sceneId = sceneIdOf(layer, state.species[layer.id]);
@@ -19,7 +37,7 @@ function sceneNote(layer, state) {
   const scene = findScene(sceneId);
   const info = state.sceneInfo[sceneId];
   if (!info) return `${scene.source} · cargando datos de la NASA…`;
-  const stamp = STAMP_FORMAT.format(new Date(info.stamp.replace('Z', ':00Z')));
+  const stamp = STAMP_FORMAT.format(toDate(info.stamps.at(-1)));
   return `${scene.source} · ${scene.stampLabel} ${stamp} UTC`;
 }
 
@@ -110,18 +128,45 @@ export function initLayerPanel(listElement) {
 
     let speciesButtons = null;
     let note = null;
+    let animation = null;
+    let animationButton = null;
+    let animationLabel = null;
     if (layer.species) {
       const { group, buttons } = buildSpeciesGroup(layer, isAvailable);
       note = document.createElement('p');
       note.className = 'ej-layer__note';
       note.setAttribute('aria-live', 'polite');
-      body.append(group, note);
+
+      // Animación: botón de pausa y rótulo del tramo (sin aria-live: cambia varias veces por segundo)
+      animation = document.createElement('div');
+      animation.className = 'ej-layer__anim';
+      animationButton = document.createElement('button');
+      animationButton.type = 'button';
+      animationButton.className = 'ej-layer__anim-button';
+      animationButton.addEventListener('click', () =>
+        setScenePlaying(!store.getState().scenePlaying)
+      );
+      animationLabel = document.createElement('span');
+      animationLabel.className = 'ej-layer__anim-label';
+      animation.append(animationButton, animationLabel);
+      body.append(group, note, animation);
       speciesButtons = buttons;
     }
 
     item.append(tile, body, input);
     listElement.append(item);
-    rows.set(layer.id, { layer, item, input, slider, amount, speciesButtons, note });
+    rows.set(layer.id, {
+      layer,
+      item,
+      input,
+      slider,
+      amount,
+      speciesButtons,
+      note,
+      animation,
+      animationButton,
+      animationLabel,
+    });
   }
 
   const render = (state) => {
@@ -143,6 +188,13 @@ export function initLayerPanel(listElement) {
         const text = sceneNote(row.layer, state);
         if (row.note.textContent !== text) row.note.textContent = text;
         row.note.hidden = text === '';
+
+        const moving = animationNote(row.layer, state);
+        row.animation.hidden = moving === '';
+        if (row.animationLabel.textContent !== moving) row.animationLabel.textContent = moving;
+        const playing = state.scenePlaying;
+        row.animationButton.textContent = playing ? '⏸' : '▶';
+        row.animationButton.setAttribute('aria-label', playing ? 'Pausar la animación' : 'Reproducir la animación');
       }
     }
   };

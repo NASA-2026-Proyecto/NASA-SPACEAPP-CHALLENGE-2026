@@ -1,5 +1,6 @@
 import { createStore } from './store.js';
 import { LAYERS } from '../config.js';
+import { reducedMotionQuery } from '../core/motion.js';
 
 const initialLayers = Object.fromEntries(LAYERS.map((layer) => [layer.id, false]));
 const initialOpacity = Object.fromEntries(LAYERS.map((layer) => [layer.id, layer.defaultOpacity ?? 0.85]));
@@ -16,9 +17,12 @@ export const store = createStore({
   nightMode: false,
   selectedMarker: null,
   species: initialSpecies,
-  sceneStep: 0,
-  scenePlaying: false,
+  // Animación de las escenas: recorre sus pasos en bucle. sceneProgress va de 0 (paso
+  // más antiguo) a 1 (el más reciente) y aquí solo se actualiza a saltos, para la interfaz.
+  scenePlaying: !reducedMotionQuery.matches,
+  sceneProgress: 1,
   sceneInfo: {}, // por id de escena: { stamp } cuando está cargada
+  reading: null, // lectura del punto seleccionado (js/data/point-reading.js)
 });
 
 export function setLayerVisible(id, visible) {
@@ -43,8 +47,8 @@ export function setLayerSpecies(id, speciesId) {
   }));
 }
 
-export function setSceneStep(step) {
-  store.setState({ sceneStep: step });
+export function setSceneProgress(progress) {
+  store.setState({ sceneProgress: progress });
 }
 
 export function setScenePlaying(playing) {
@@ -55,4 +59,8 @@ export function setSceneInfo(sceneId, info) {
   store.setState((state) => ({
     sceneInfo: { ...state.sceneInfo, [sceneId]: info },
   }));
+}
+
+export function setReading(reading) {
+  store.setState({ reading });
 }

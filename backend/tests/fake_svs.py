@@ -31,8 +31,13 @@ def _png(array: np.ndarray, mode: str) -> bytes:
     return buffer.getvalue()
 
 
-def frame_png() -> bytes:
-    pixels = RAMP[np.round(true_position() * 255).astype(int)]
+FRAME_DRIFT = 0.02  # cada fotograma sube esto en la escala respecto al anterior
+
+
+def frame_png(number: int = 3) -> bytes:
+    """Fotograma `number` (1 = el más antiguo). El 3 es exactamente `true_position()`."""
+    position = np.clip(true_position() + FRAME_DRIFT * (number - 3), 0.0, 1.0)
+    pixels = RAMP[np.round(position * 255).astype(int)]
     pixels[LOGO] = (90, 90, 90)  # logotipo: un gris que no está en la rampa
     pixels[:, COAST_COLUMN] = (0, 0, 0)  # una "costa" de un píxel
     return _png(pixels, "RGB")
@@ -47,10 +52,11 @@ def colour_bar_png() -> bytes:
 
 
 class FakeSvs:
-    def __init__(self, updated: str = "2026-11-14T02:00:58.490675-05:00") -> None:
+    def __init__(self, updated: str = "2026-11-14T02:00:58.490675-05:00", frames: int = 3) -> None:
         self.updated = updated
+        self.frames = frames
         self.fail = False
-        self.frame = frame_png()
+        self.broken_frame: bytes | None = None  # si se pone, sustituye a todos los fotogramas
         self.requests: list[str] = []
 
     def get(self, url: str) -> bytes:
@@ -61,9 +67,11 @@ class FakeSvs:
             return json.dumps(self._page()).encode()
         if url.endswith("/frames/"):
             # Desordenado a propósito: el más reciente es el de número más alto
-            return b'<a href="00000002.png">2</a> <a href="00000003.png">3</a> <a href="00000001.png">1</a>'
-        if url.endswith("00000003.png"):
-            return self.frame
+            numbers = [*range(2, self.frames + 1), 1]
+            return " ".join(f'<a href="{n:08d}.png">{n}</a>' for n in numbers).encode()
+        if "/frames/" in url and url.endswith(".png"):
+            number = int(url.rsplit("/", 1)[1].removesuffix(".png"))
+            return self.broken_frame or frame_png(number)
         if url.endswith("PM2.5_colorbar_plain.png"):
             return colour_bar_png()
         raise AssertionError(f"petición inesperada: {url}")

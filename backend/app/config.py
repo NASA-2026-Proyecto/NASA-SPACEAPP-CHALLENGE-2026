@@ -16,9 +16,10 @@ class Settings(BaseSettings):
     # Vacío por defecto: el front llama a /api en su mismo origen y nginx hace de proxy.
     cors_origins: list[str] = []
 
-    # Escena de aerosoles en vivo (GEOS-FP): cuántos pasos de 3 h se sirven y si se
-    # empieza a preparar al arrancar (si no, con la primera petición).
-    scene_steps: int = 3
+    # Escenas (GEOS-FP y visualización diaria del EIC): cuántos pasos de 3 h lleva cada
+    # una (8 = el último día, que el front anima en bucle) y si se empiezan a preparar
+    # al arrancar (si no, con la primera petición).
+    scene_steps: int = 8
     scene_warmup: bool = True
 
 

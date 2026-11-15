@@ -37,7 +37,7 @@ def svs() -> FakeSvs:
 
 @pytest.fixture
 def store(svs) -> SceneStore:
-    return SceneStore(Pm25Source(svs.client()))
+    return SceneStore(Pm25Source(svs.client(), steps=1, factor=2))
 
 
 def to_ugm3(position):
@@ -164,8 +164,9 @@ def test_scene_matches_the_frontend_format(store):
     assert (scale["kind"], scale["min"], scale["max"]) == ("log", SCALE_MIN, SCALE_MAX)
     assert len(scale["ramp"]) == 17  # colores de la barra de la NASA, de menos a más
     assert scale["ramp"][0] == "#fff5d7" and scale["ramp"][-1] == "#6e1905"
-    assert manifest["provenance"]["source_frame"].endswith("00000003.png")  # el más reciente
-    assert manifest["provenance"]["source_frame"].startswith("https://")
+    (frame_url,) = manifest["provenance"]["source_frames"]
+    assert frame_url.endswith("00000003.png")  # el más reciente
+    assert frame_url.startswith("https://")
 
 
 def test_values_are_ugm3_from_south_to_north(store):
@@ -186,6 +187,37 @@ def test_values_are_ugm3_from_south_to_north(store):
     assert np.nanmin(values) >= SCALE_MIN and np.nanmax(values) <= SCALE_MAX
 
 
+def test_series_takes_spaced_frames_ending_at_the_newest():
+    svs = FakeSvs(frames=10)
+    store = SceneStore(Pm25Source(svs.client(), steps=3, frame_spacing=4, factor=4))
+    store.refresh()
+    scene = store.get()
+    manifest = scene.manifest
+
+    # De 10 fotogramas horarios, uno de cada 4 acabando en el último: 2, 6 y 10
+    used = [url.rsplit("/", 1)[1] for url in manifest["provenance"]["source_frames"]]
+    assert used == ["00000002.png", "00000006.png", "00000010.png"]
+
+    time = manifest["time"]
+    assert (time["steps"], time["step_minutes"]) == (3, 240)
+    assert time["stamps_utc"] == ["2026-11-13T23:00Z", "2026-11-14T03:00Z", "2026-11-14T07:00Z"]
+
+    grid = manifest["grid"]  # 64 x 32 píxeles en bloques de 4
+    assert (grid["n_lat"], grid["n_lon"]) == (8, 16)
+    values = np.frombuffer(scene.files["pm25.f32"], dtype="<f4").reshape(3, 8, 16)
+    # Cada fotograma del falso está más contaminado que el anterior: el orden es cronológico
+    cell = values[:, 2, 12]
+    assert cell[0] < cell[1] < cell[2]
+
+
+def test_series_uses_what_exists_when_there_are_few_frames():
+    store = SceneStore(Pm25Source(FakeSvs(frames=3).client(), steps=8, frame_spacing=3))
+    store.refresh()
+    manifest = store.get().manifest
+    assert manifest["time"]["steps"] == 1
+    assert manifest["provenance"]["source_frames"][0].endswith("00000003.png")
+
+
 def test_scene_is_rebuilt_only_when_nasa_publishes_a_new_render(store, svs):
     store.refresh()
     first = store.get()
@@ -204,7 +236,7 @@ def test_scene_is_rebuilt_only_when_nasa_publishes_a_new_render(store, svs):
 def test_unreadable_frame_is_not_published(store, svs):
     buffer = BytesIO()
     Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 255)).save(buffer, format="PNG")  # azul: fuera de la rampa
-    svs.frame = buffer.getvalue()
+    svs.broken_frame = buffer.getvalue()
     store.refresh()
     assert store.get() is None
     assert "Solo se pudo leer" in store.error

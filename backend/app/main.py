@@ -22,7 +22,7 @@ from app.services.svs import SvsClient
 def default_scenes(settings: Settings) -> dict[str, SceneStore]:
     sources = [
         AerosolSource(GeosFpClient(), steps=settings.scene_steps),  # API casi en tiempo real
-        Pm25Source(SvsClient()),  # visualización diaria del EIC
+        Pm25Source(SvsClient(), steps=settings.scene_steps),  # visualización diaria del EIC
     ]
     return {source.scene_id: SceneStore(source) for source in sources}
 
