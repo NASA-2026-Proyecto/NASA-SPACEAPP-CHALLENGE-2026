@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     # Vacío por defecto: el front llama a /api en su mismo origen y nginx hace de proxy.
     cors_origins: list[str] = []
 
+    # Escena de aerosoles en vivo (GEOS-FP): cuántos pasos de 3 h se sirven y si se
+    # empieza a preparar al arrancar (si no, con la primera petición).
+    scene_steps: int = 3
+    scene_warmup: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

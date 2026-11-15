@@ -10,7 +10,7 @@
 //                            como "Pendiente"; al añadirlo, se activa sola.
 import { SCENES } from './catalog/scenes.js';
 
-const AEROSOL_SCENE = SCENES.find((scene) => scene.id === 'global-aerosols-2026-07');
+const AEROSOL_SCENE = SCENES.find((scene) => scene.id === 'aerosol-latest');
 
 export const LAYERS = [
   {

@@ -5,6 +5,7 @@ description = "Earth Jukebox API: Earth observation data prepared for sonificati
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.162.7",
+    "numpy>=2.5.4",
     "pydantic-settings>=2.16.3",
     "uvicorn[standard]>=0.54.0",
 ]

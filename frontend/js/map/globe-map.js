@@ -1,7 +1,7 @@
 import * as maplibregl from 'https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs';
 import { LAYERS } from '../config.js';
 import { readCssToken } from '../core/css-tokens.js';
-import { store } from '../state/app-store.js';
+import { store, setSceneStep } from '../state/app-store.js';
 import { startAutoSpin } from './auto-spin.js';
 import { buildGibsSource } from './gibs.js';
 import { reducedMotionQuery } from '../core/motion.js';
@@ -19,6 +19,7 @@ const INITIAL_VIEW = { center: [-30, 25], zoom: 1.6 };
 const PLACES = { spain: { center: [-3.7, 40.4], zoom: 5.2 } };
 const LOAD_TIMEOUT_MS = 20000;
 const ON_GLOBE_TOLERANCE_PX = 2;
+const SCENE_RETRY_MS = 5000;
 
 const BASEMAP_ID = 'nasa-blue-marble';
 const BASEMAP_TILES =
@@ -144,10 +145,12 @@ export async function createGlobeMap({ container }) {
     }
   }
 
-  // Las escenas pesan decenas de MB: se descargan la primera vez que se activa su capa,
-  // no al abrir la página.
+  // Las escenas se descargan la primera vez que se activa su capa, no al abrir la página.
+  // Si aún no están listas (la API las prepara con datos de la NASA) se reintenta mientras
+  // la capa siga activa.
   const seriesLayers = [];
   const requestedScenes = new Set();
+  let sceneRetryTimer = null;
   function loadScenesOnDemand(state) {
     for (const layer of LAYERS.filter(isSceneLayer)) {
       if (!state.layers[layer.id] || requestedScenes.has(layer.id)) continue;
@@ -158,9 +161,16 @@ export async function createGlobeMap({ container }) {
           seriesLayers.push(
             createSeriesLayer(map, { layerId: layer.id, scene, species: entry.species, beforeId })
           );
+          if (entry.live) setSceneStep(scene.time.steps - 1);
           sync(store.getState());
         })
-        .catch((error) => console.warn(`[mapa] Sin datos para la capa "${layer.id}":`, error));
+        .catch((error) => {
+          console.warn(`[mapa] Sin datos para la capa "${layer.id}"; se reintentará:`, error);
+          sceneRetryTimer = setTimeout(() => {
+            requestedScenes.delete(layer.id);
+            sync(store.getState());
+          }, SCENE_RETRY_MS);
+        });
     }
   }
 
@@ -222,6 +232,7 @@ export async function createGlobeMap({ container }) {
       hoverGlow?.destroy();
       stopSpin();
       popup?.remove();
+      clearTimeout(sceneRetryTimer);
       seriesLayers.forEach((series) => series.destroy());
       map.remove();
     },
