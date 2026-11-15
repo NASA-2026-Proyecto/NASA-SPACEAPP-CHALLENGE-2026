@@ -4,6 +4,8 @@
 //
 //   source      -> de dónde vienen los datos, en corto (se enseña en el panel)
 //   stampLabel  -> qué significa la fecha del manifiesto ("dato del" / "publicado el")
+//   species     -> id, label y color del botón; `fade: 'sparse'` si el dato solo cubre
+//                  parte del mapa y hasta su valor más bajo debe verse (js/map/series-layer.js)
 export const SCENES = [
   {
     // Visualización diaria del Earth Information Center: el campo completo, "dónde y cuánto"
@@ -52,6 +54,23 @@ export const SCENES = [
       url: 'https://svs.gsfc.nasa.gov/5113/',
     },
     species: [{ id: 'frp', label: 'EIC Incendios', color: '#E3D43F' }],
+  },
+  {
+    // Visualización del EIC: precipitación de los satélites GPM (IMERG), cada media hora
+    id: 'precipitation-latest',
+    title: 'Precipitación casi en tiempo real (GPM IMERG): visualización del EIC',
+    dataUrl: 'api/scenes/precipitation-latest',
+    source: 'Visualización del EIC (satélites GPM, IMERG)',
+    stampLabel: 'dato del',
+    reference: {
+      title: 'Near Real-Time Global Precipitation from the Global Precipitation Measurement Constellation',
+      credit: 'NASA Scientific Visualization Studio',
+      url: 'https://svs.gsfc.nasa.gov/4285/',
+    },
+    species: [
+      { id: 'rain', label: 'Lluvia', color: '#60D300', fade: 'sparse' },
+      { id: 'snow', label: 'Nieve', color: '#4F9AFF', fade: 'sparse' },
+    ],
   },
 ];
 

@@ -17,6 +17,7 @@ from app.services.aerosol_scene import AerosolSource
 from app.services.fire_scene import FireSource
 from app.services.geosfp import GeosFpClient
 from app.services.pm25_scene import Pm25Source
+from app.services.precipitation_scene import PrecipitationSource
 from app.services.scenes import SceneStore, SceneStores
 from app.services.svs import SvsClient
 
@@ -27,9 +28,10 @@ def default_scenes(settings: Settings) -> SceneStores:
     return {
         # API casi en tiempo real
         AerosolSource.scene_id: SceneStore(AerosolSource(GeosFpClient(), steps=settings.scene_steps)),
-        # Visualizaciones diarias del Earth Information Center
+        # Visualizaciones del Earth Information Center
         Pm25Source.scene_id: SceneStore(Pm25Source(svs, steps=settings.scene_steps)),
         FireSource.scene_id: SceneStore(FireSource(svs, steps=settings.scene_steps)),
+        PrecipitationSource.scene_id: SceneStore(PrecipitationSource(svs, steps=settings.scene_steps)),
     }
 
 

@@ -3,7 +3,6 @@ import { LAYERS } from '../config.js';
 import { readCssToken } from '../core/css-tokens.js';
 import { store, setSceneInfo, setSceneProgress } from '../state/app-store.js';
 import { startAutoSpin } from './auto-spin.js';
-import { buildGibsSource } from './gibs.js';
 import { reducedMotionQuery } from '../core/motion.js';
 import { addNightLights, syncNight } from './night-lights.js';
 import { addLandDots, DOTS_SOURCE, DOTS_LAYER } from './land-dots.js';
@@ -78,32 +77,6 @@ function findFirstLabelId(map) {
     )?.id;
 }
 
-function addNasaLayers(map, firstLabelId) {
-  for (const layer of LAYERS) {
-    if (!layer.source) continue;
-
-    map.addSource(layer.id, buildGibsSource(layer.source));
-    map.addLayer(
-      {
-        id: layer.id,
-        type: 'raster',
-        source: layer.id,
-        layout: { visibility: 'none' },
-        paint: { 'raster-opacity': layer.defaultOpacity ?? 0.85, ...layer.paint },
-      },
-      firstLabelId
-    );
-  }
-}
-
-function syncLayers(map, state) {
-  for (const layer of LAYERS) {
-    if (!layer.source || !map.getLayer(layer.id)) continue;
-    map.setLayoutProperty(layer.id, 'visibility', state.layers[layer.id] ? 'visible' : 'none');
-    map.setPaintProperty(layer.id, 'raster-opacity', state.opacity[layer.id]);
-  }
-}
-
 export async function createGlobeMap({ container }) {
   const map = new maplibregl.Map({
     container,
@@ -130,10 +103,9 @@ export async function createGlobeMap({ container }) {
     map.on('error', (event) => console.warn('Aviso del mapa:', event.error?.message ?? event));
   });
 
-  // Orden (de abajo arriba): mapa base, luces de noche, capas NASA, puntos, etiquetas
+  // Orden (de abajo arriba): mapa base, luces de noche, escenas, puntos, etiquetas
   const beforeId = findFirstLabelId(map);
   addNightLights(map, { beforeId, baseId: BASEMAP_ID });
-  addNasaLayers(map, beforeId);
 
   let lastNight = null;
   function syncAppearance(state) {
@@ -196,7 +168,6 @@ export async function createGlobeMap({ container }) {
   });
 
   const sync = (state) => {
-    syncLayers(map, state);
     syncAppearance(state);
     loadScenesOnDemand(state);
     for (const series of seriesLayers) series.sync(state);

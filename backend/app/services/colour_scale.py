@@ -1,8 +1,9 @@
-"""De color a valor: lee una barra de color continua y la invierte sobre una imagen.
+"""De color a valor: lee una barra de color y la invierte sobre una imagen.
 
 Las visualizaciones de la NASA son imágenes; con su barra de color se recupera, píxel a
-píxel, la posición en la escala (0 = extremo bajo, 1 = extremo alto). El resto de las
-funciones limpian y reducen la matriz resultante.
+píxel, la posición en la escala (0 = extremo bajo, 1 = extremo alto) si la barra es
+continua, o la clase si va por tramos de color uniforme. El resto de las funciones
+limpian y reducen la matriz resultante.
 """
 
 import numpy as np
@@ -17,11 +18,52 @@ _BORDER_SEARCH = 8  # píxeles de cada extremo donde se busca el marco
 # Colores que se comparan a la vez con la rampa. Cada tanda crea una matriz temporal de
 # tanda x colores de la rampa x 3: con 2.000 son unos 10 MB (con 20.000 pasaba de 250 MB).
 _CHUNK = 2_000
+_MIN_RUN = 3  # píxeles seguidos del mismo color para contar como tramo de una barra
+_BLACK = 30  # suma RGB por debajo de la cual un tramo es un separador negro
 
 
 def _colour_jump(a: npt.NDArray[np.uint8], b: npt.NDArray[np.uint8]) -> int:
     """Diferencia entre dos colores: suma de las diferencias de sus tres canales."""
     return int(np.abs(a.astype(int) - b.astype(int)).sum())
+
+
+def _bar_row(colour_bar: Image.Image) -> Ramp:
+    """Colores de la fila central de la franja horizontal opaca más ancha de la imagen.
+
+    Raises:
+        ValueError: Si la imagen no tiene una franja opaca.
+    """
+    rgba = np.asarray(colour_bar.convert("RGBA"))
+    opaque_rows = np.nonzero((rgba[..., 3] == 255).sum(axis=1) > rgba.shape[1] // 2)[0]
+    if opaque_rows.size == 0:
+        raise ValueError("La barra de color no tiene una franja opaca.")
+    row = rgba[(opaque_rows.min() + opaque_rows.max()) // 2]
+    columns = np.nonzero(row[:, 3] == 255)[0]
+    colours: Ramp = row[columns.min() : columns.max() + 1, :3].copy()
+    return colours
+
+
+def classes_from_colour_bar(colour_bar: Image.Image) -> Ramp:
+    """Colores de una barra por tramos (cada clase, un color uniforme), del bajo al alto.
+
+    Incluye las flechas de los extremos ("por debajo" y "por encima" de la escala) cuando
+    tienen color propio. Los separadores negros y los tramos de menos de 3 píxeles se
+    descartan, y dos tramos seguidos del mismo color cuentan como uno.
+
+    Raises:
+        ValueError: Si la imagen no tiene una franja opaca.
+    """
+    row = _bar_row(colour_bar)
+    # Inicio de cada tramo de color uniforme, y el final del último
+    starts = np.concatenate([[0], np.nonzero((row[1:] != row[:-1]).any(axis=1))[0] + 1, [len(row)]])
+    classes: list[npt.NDArray[np.uint8]] = []
+    for start, end in zip(starts[:-1], starts[1:], strict=True):
+        colour = row[start]
+        if end - start < _MIN_RUN or int(colour.sum()) <= _BLACK:
+            continue
+        if not classes or (classes[-1] != colour).any():
+            classes.append(colour)
+    return np.array(classes, dtype=np.uint8).reshape(-1, 3)
 
 
 def gradient_from_colour_bar(colour_bar: Image.Image) -> Ramp:
@@ -32,13 +74,7 @@ def gradient_from_colour_bar(colour_bar: Image.Image) -> Ramp:
     Raises:
         ValueError: Si la imagen no tiene una franja opaca o la rampa es demasiado corta.
     """
-    rgba = np.asarray(colour_bar.convert("RGBA"))
-    opaque_rows = np.nonzero((rgba[..., 3] == 255).sum(axis=1) > rgba.shape[1] // 2)[0]
-    if opaque_rows.size == 0:
-        raise ValueError("La barra de color no tiene una franja opaca.")
-    row = rgba[(opaque_rows.min() + opaque_rows.max()) // 2]
-    columns = np.nonzero(row[:, 3] == 255)[0]
-    gradient: Ramp = row[columns.min() : columns.max() + 1, :3].copy()
+    gradient = _bar_row(colour_bar)
 
     # Quita el marco: si cerca de un extremo hay un salto brusco de color, lo que queda
     # fuera del salto no es rampa (puede ser más de un píxel, p. ej. dos blancos seguidos)

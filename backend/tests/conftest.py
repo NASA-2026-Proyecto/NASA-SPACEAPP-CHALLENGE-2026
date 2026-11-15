@@ -39,3 +39,9 @@ def client(settings) -> TestClient:
 def fixture_text() -> Callable[[str], str]:
     """Lee una respuesta real de la NASA guardada en tests/fixtures/."""
     return lambda name: (FIXTURES / name).read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def fixture_bytes() -> Callable[[str], bytes]:
+    """Lee un archivo binario real de la NASA guardado en tests/fixtures/."""
+    return lambda name: (FIXTURES / name).read_bytes()
