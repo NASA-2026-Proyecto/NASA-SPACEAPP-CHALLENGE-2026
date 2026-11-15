@@ -39,6 +39,20 @@ export const SCENES = [
       { id: 'sulfate', label: 'Sulfate', color: '#56E03A' },
     ],
   },
+  {
+    // Visualización diaria del EIC: incendios activos vistos por VIIRS, un fotograma por día
+    id: 'fires-latest',
+    title: 'Incendios activos (VIIRS): visualización diaria del EIC',
+    dataUrl: 'api/scenes/fires-latest',
+    source: 'Visualización diaria del EIC (satélite VIIRS, ventana de 5 días)',
+    stampLabel: 'dato del',
+    reference: {
+      title: 'Active Fires As Observed by VIIRS, 2024-Present',
+      credit: 'NASA Scientific Visualization Studio',
+      url: 'https://svs.gsfc.nasa.gov/5113/',
+    },
+    species: [{ id: 'frp', label: 'EIC Incendios', color: '#E3D43F' }],
+  },
 ];
 
 export const findScene = (id) => SCENES.find((scene) => scene.id === id);

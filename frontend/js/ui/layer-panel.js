@@ -24,10 +24,15 @@ const toDate = (stamp) => new Date(stamp.replace('Z', ':00Z'));
 function animationNote(layer, state) {
   const info = state.sceneInfo[sceneIdOf(layer, state.species[layer.id])];
   if (!info || !state.layers[layer.id] || info.stamps.length < 2) return '';
-  const span = Math.round((toDate(info.stamps.at(-1)) - toDate(info.stamps[0])) / 3_600_000);
-  if (!state.scenePlaying) return `Últimas ${span} h · en pausa en el último dato`;
+  const hours = (toDate(info.stamps.at(-1)) - toDate(info.stamps[0])) / 3_600_000;
+  // Series de varios días (incendios) en días; las demás, en horas
+  const inDays = hours >= 48;
+  const span = Math.round(inDays ? hours / 24 : hours);
+  const unit = (count) => (inDays ? (count === 1 ? 'día' : 'días') : 'h');
+  const range = `${inDays ? 'Últimos' : 'Últimas'} ${span} ${unit(span)}`;
+  if (!state.scenePlaying) return `${range} · en pausa en el último dato`;
   const back = Math.round((1 - state.sceneProgress) * span);
-  return `Últimas ${span} h · ${back === 0 ? 'último dato' : `${back} h antes`}`;
+  return `${range} · ${back === 0 ? 'último dato' : `${back} ${unit(back)} antes`}`;
 }
 
 // Qué se está viendo y de cuándo es: cada fuente tiene su propia fecha.

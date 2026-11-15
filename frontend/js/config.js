@@ -15,6 +15,8 @@ import { findScene } from './catalog/scenes.js';
 // Aerosoles: primero la visualización diaria del EIC (PM2.5) y después las especies del
 // modelo casi en tiempo real.
 const AEROSOL_SCENES = ['pm25-latest', 'aerosol-latest'];
+// Incendios: la visualización diaria del EIC (potencia radiativa, VIIRS).
+const FIRE_SCENES = ['fires-latest'];
 const speciesOf = (sceneIds) =>
   sceneIds.flatMap((sceneId) =>
     findScene(sceneId).species.map((species) => ({ ...species, sceneId }))
@@ -28,7 +30,10 @@ export const LAYERS = [
     icon: "flame",
     ramp: ["#ff5a4d", "#d62f6f", "#7a3cf0"], // de rojo a morado
     defaultOpacity: 0.9,
-    // source: { layerId: '…', matrixSet: '…', maxZoom: …, format: 'png' },  <- pendiente
+    badge: 'NASA',
+    kind: 'scene',
+    scenes: FIRE_SCENES,
+    species: speciesOf(FIRE_SCENES),
   },
   {
     id: "rain",

@@ -7,10 +7,14 @@ const FEATHER_CELLS = 12;
 const MERCATOR_MAX_LAT = 85.0511287798;
 const MAX_CANVAS_WIDTH = 1100; // el lienzo se vuelve a subir a la GPU en cada fotograma
 const RAMP_SIZE = 256;
-// Escalas con rampa (0..1): por debajo de RAMP_CLEAR es transparente y a partir de
-// RAMP_SOLID tiene la opacidad máxima, para que el aire limpio deje ver el mapa.
-const RAMP_CLEAR = 0.08;
-const RAMP_SOLID = 0.45;
+// Escalas con rampa (posición 0..1): por debajo de `clear` es transparente y a partir de
+// `solid` tiene la opacidad máxima. En la logarítmica (un campo continuo, como el PM2.5)
+// el aire limpio deja ver el mapa; en la lineal (datos puntuales, como los incendios)
+// cualquier valor por encima de cero se ve.
+const RAMP_FADE = {
+  log: { clear: 0.08, solid: 0.45 },
+  linear: { clear: 0.01, solid: 0.12 },
+};
 
 const smooth = (t) => t * t * (3 - 2 * t);
 const mercatorY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
@@ -162,20 +166,22 @@ export function createSeriesLayer(map, { id, layerId, scene, species, beforeId }
     }
   }
 
-  // Escala logarítmica con la rampa de colores original (p. ej. la barra de la NASA).
-  // Los huecos (NaN: donde la imagen de origen no tenía dato) quedan transparentes.
+  // Escala (logarítmica o lineal) con la rampa de colores original, la de la barra de
+  // la NASA. Los huecos (NaN: donde la imagen de origen no tenía dato) quedan transparentes.
   function paintRamp(id, scale) {
     if (!rampTables.has(id)) rampTables.set(id, buildRampTable(scale.ramp));
     const table = rampTables.get(id);
-    const logMin = Math.log(scale.min);
-    const logSpan = Math.log(scale.max) - logMin;
+    const isLog = scale.kind === 'log';
+    const start = isLog ? Math.log(scale.min) : scale.min;
+    const span = (isLog ? Math.log(scale.max) : scale.max) - start;
+    const { clear, solid } = RAMP_FADE[scale.kind];
     const data = image.data;
     for (let r = 0; r < height; r += 1) {
       for (let c = 0; c < width; c += 1) {
         const i = r * width + c;
         const offset = i * 4;
-        const position = (Math.log(field[i]) - logMin) / logSpan;
-        if (!(position > RAMP_CLEAR)) {
+        const position = ((isLog ? Math.log(field[i]) : field[i]) - start) / span;
+        if (!(position > clear)) {
           data[offset + 3] = 0;
           continue;
         }
@@ -184,7 +190,7 @@ export function createSeriesLayer(map, { id, layerId, scene, species, beforeId }
         data[offset] = table[entry];
         data[offset + 1] = table[entry + 1];
         data[offset + 2] = table[entry + 2];
-        const strength = smooth(Math.min((clamped - RAMP_CLEAR) / (RAMP_SOLID - RAMP_CLEAR), 1));
+        const strength = smooth(Math.min((clamped - clear) / (solid - clear), 1));
         data[offset + 3] = strength * MAX_ALPHA * 255 * fadeRows[r] * fadeCols[c];
       }
     }
@@ -197,7 +203,7 @@ export function createSeriesLayer(map, { id, layerId, scene, species, beforeId }
     if (!cached) {
       resample(id, step, field);
       const scale = scene.manifest.species[id].scale;
-      if (scale?.kind === 'log' && scale.ramp) paintRamp(id, scale);
+      if (scale?.ramp && RAMP_FADE[scale.kind]) paintRamp(id, scale);
       else paintTint(id);
       cached = document.createElement('canvas');
       cached.width = width;

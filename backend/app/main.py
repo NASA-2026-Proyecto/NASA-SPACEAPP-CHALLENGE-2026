@@ -13,6 +13,7 @@ from app import __version__
 from app.api import router as api_router
 from app.config import Settings, get_settings
 from app.services.aerosol_scene import AerosolSource
+from app.services.fire_scene import FireSource
 from app.services.geosfp import GeosFpClient
 from app.services.pm25_scene import Pm25Source
 from app.services.scenes import SceneStore
@@ -23,6 +24,7 @@ def default_scenes(settings: Settings) -> dict[str, SceneStore]:
     sources = [
         AerosolSource(GeosFpClient(), steps=settings.scene_steps),  # API casi en tiempo real
         Pm25Source(SvsClient(), steps=settings.scene_steps),  # visualización diaria del EIC
+        FireSource(SvsClient(), steps=settings.scene_steps),  # visualización diaria del EIC
     ]
     return {source.scene_id: SceneStore(source) for source in sources}
 

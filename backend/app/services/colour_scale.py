@@ -148,3 +148,14 @@ def reject_thin_features(position: np.ndarray, threshold: float = 0.08) -> np.nd
     eroded = _window_extreme(np.where(np.isfinite(position), position, np.inf), np.minimum, np.inf)
     opened = _window_extreme(np.where(np.isfinite(eroded), eroded, -np.inf), np.maximum, -np.inf)
     return np.where(position - opened > threshold, np.nan, position).astype(np.float32)
+
+
+def max_pool(values: np.ndarray, factor: int) -> np.ndarray:
+    """Reduce una matriz 2D quedándose con el máximo de cada bloque de factor x factor.
+
+    Para datos puntuales (un incendio ocupa pocos píxeles): la media los diluiría.
+    """
+    rows, cols = values.shape
+    if rows % factor or cols % factor:
+        raise ValueError(f"El tamaño {values.shape} no es divisible por {factor}.")
+    return values.reshape(rows // factor, factor, cols // factor, factor).max(axis=(1, 3))

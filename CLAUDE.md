@@ -59,6 +59,8 @@ backend/                  uv project (package = false: an app, run from backend/
   app/services/svs.py     SVS client: page JSON (`/api/{id}`), frame listing, downloads
   app/services/colour_scale.py   Colour → value: read a colour bar, invert it on an image, reject thin lines, drop islands, downsample, fill small gaps (numpy + Pillow)
   app/services/pm25_scene.py     Pm25Source → scene `pm25-latest` (EIC daily visualization SVS 5151)
+  app/services/exr.py            read_rgb(bytes): OpenEXR frame → linear float32 RGB
+  app/services/fire_scene.py     FireSource → scene `fires-latest` (EIC daily visualization SVS 5113)
   geosfp/  tools/         Alex's OFFLINE pipeline (xarray + pydap): download episodes, build static scenes. Not imported by app/. Run: `uv run --group pipeline python -m tools.<script>`
   tests/                  conftest (client fixture with explicit Settings and a fake NASA), fakes.py (FakeGeosFp), fake_svs.py (FakeSvs with a synthetic frame and colour bar), test_app.py, test_point.py, test_scenes.py, test_pm25_scene.py
   pyproject.toml  uv.lock  .python-version (3.13)  Dockerfile  .dockerignore
@@ -91,6 +93,7 @@ There are two scenes, both built by the backend at runtime and wired in `app/mai
 
 - `pm25-latest`, the **field**: the newest frame of the EIC daily visualization PM2.5 (SVS 5151, GEOS-CF). Colours are converted back to µg/m³ with the page's colour bar (log scale 0.4–409.6), 2×2 pixel blocks are averaged to a 512 × 256 grid, coastlines and borders are removed by shape (bright features under 3 px) and filled, and the logo and date boxes stay NaN. Eight steps 3 hours apart; the last stamp is NASA's publication time (the spacing between steps is exact, the absolute hour is not, because each frame's own hour is only printed on the image). The manifest carries `scale: {kind: "log", min, max, ramp}` with NASA's ramp colours, and `series-layer.js` paints it with that ramp (transparent in clean air).
 - `aerosol-latest`, the **probe** source: GEOS-FP species, described next.
+- `fires-latest`: the EIC daily visualization of VIIRS active fires (SVS 5113), species `frp` in MW. It uses the equirectangular "SoaS" frames (EXR, 4096 × 2048, about 6.5 MB each, one per day; each shows a 5-day moving window). `frp_from_rgb()` maps the linear red channel to fire radiative power with the colour bar read once from the frame legend (constants in `fire_scene.py`; background red ≤ 0.02, fires > 0.2), and each grid cell keeps the strongest fire of its 8 × 8 pixel block (512 × 256 grid, `scale: {kind: "linear", min: 0, max: 8, ramp}`). **The newest frames arrive empty or half-filled**, so the source downloads `steps + 5` frames and drops trailing ones with fewer than 0.6× the median fire-pixel count (on 15 Nov 2026 it skipped 4 and used 2–9 Nov). The version is the `Last-Modified` of the newest frame (a HEAD request), because the page's `update_date` does not change with the daily render. Frame dates are inferred: newest published frame = render date − 1 day, one frame per day (checked against the dated version for the last frames). Each rebuild downloads about 85 MB from NASA, once a day. The "Incendios" layer has a single button ("EIC Incendios"); fires are not yet in the point card or the sound.
 
 In the panel the Aerosoles layer has one button per species across both scenes (`config.js`: `scenes`, each species tagged with its `sceneId`); **PM2.5 is first and the default**. A scene is fetched the first time one of its species is selected with the layer on, and each scene gets its own map layer (`aerosol-<sceneId>`). The panel note shows the source and date of what is on screen (`sceneInfo` in the store).
 
@@ -206,7 +209,7 @@ The Compose project name is `earth-jukebox` (containers `earth-jukebox-backend-1
 - NASA is a runtime dependency: if GEOS-FP is down when the backend starts, the aerosol layer stays empty until it recovers (no on-disk copy of the last scene). The in-memory scene is per process, so a serverless host would rebuild it on every cold start.
 - GEOS-FP "assim" data runs about 12 hours behind real time.
 - `gibs.js` is currently unused (no layer has a GIBS `source`); it will be needed again for fires.
-- The explorer panel note still reads "PENDIENTE"; the fire and rain layers have no data.
+- The explorer panel note still reads "PENDIENTE"; the rain layer has no data.
 - `SCENE_STEPS` and `SCENE_WARMUP` are not in `.env.example` (Claude cannot edit it).
 
 ## Verified NASA facts (probed 14-15 Nov 2026)
@@ -230,6 +233,6 @@ Design principle: the **EIC daily visualization is the field** (complete global 
 - **Phase C, live data at a point: DONE** (see "Click → reading → popup and sound"). What was planned:
   1. Popup: PM2.5 value, species breakdown and trend over the last 3 steps, read locally from the scenes.
   2. Sound: replace the simulated source. PM2.5 → pitch and level; species shares → timbre; trend → a short cue. Mapping ideas are in the notebooks 03/04 of the exploration repo.
-- **Phase D, fires:** "Incendios" loads the GIBS VIIRS tiles; live numbers near the click need a FIRMS key.
+- **Phase D, fires: the globe part is DONE** with the EIC visualization (not GIBS tiles). Still open: fires in the point card and the sound; live numbers near the click need a FIRMS key.
 
 The earlier idea of migrating Gabriel's backend from `D:\NASA-Proyecto` (NASA POWER, EONET, `/api/layers`) is on hold: this plan replaces it. Do not bring its Mapbox token machinery, `requirements*.txt` or root Dockerfile in any case.

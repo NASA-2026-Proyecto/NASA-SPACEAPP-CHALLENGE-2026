@@ -26,8 +26,9 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 | The aerosol layer is animated: it loops through the last 21 hours of data, with a pause button | ✅ Working |
 | Click on the globe → PM2.5 at that point (EIC visualization), aerosol composition and 6-hour trend (GEOS-FP) | ✅ Working |
 | Sonification of the clicked point: PM2.5 sets pitch and level, composition sets the timbre, the trend plays a short cue | ✅ Working (a simulated signal plays until a point is selected) |
-| API: `/api/health`, `/api/point`, `/api/scenes` (`pm25-latest`, `aerosol-latest`) | ✅ Working |
-| Wildfires and precipitation layers on the globe | 🔜 Pending |
+| API: `/api/health`, `/api/point`, `/api/scenes` (`pm25-latest`, `aerosol-latest`, `fires-latest`) | ✅ Working |
+| Fires layer: the EIC daily visualization *Active Fires As Observed by VIIRS*, decoded into fire radiative power (MW) and animated day by day over the last week | ✅ Working |
+| Fires in the point card and in the sound; precipitation layer | 🔜 Pending |
 
 ## Architecture
 
@@ -227,4 +228,5 @@ The app is currently run locally. Because the frontend only calls relative `/api
 - [NASA Earth Observatory](https://earthobservatory.nasa.gov/): *Earth at Night* (night lights)
 - [OpenFreeMap](https://openfreemap.org/), [OpenMapTiles](https://openmaptiles.org/) and [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors: map labels and boundaries
 - [MapLibre GL JS](https://maplibre.org/), [Three.js](https://threejs.org/), [Bootstrap](https://getbootstrap.com/), [FastAPI](https://fastapi.tiangolo.com/)
-- Planned: VIIRS active fires ([NASA GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api), [FIRMS](https://firms.modaps.eosdis.nasa.gov/))
+- [NASA Scientific Visualization Studio](https://svs.gsfc.nasa.gov/5113/): the Earth Information Center daily visualization *Active Fires As Observed by VIIRS*
+- Planned: live VIIRS fire detections ([NASA GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api), [FIRMS](https://firms.modaps.eosdis.nasa.gov/))

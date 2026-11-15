@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urljoin
 
-from app.services.http import http_get
+from app.services.http import http_get, http_last_modified
 
 API_URL = "https://svs.gsfc.nasa.gov/api/"
 
@@ -57,15 +57,31 @@ def parse_page(raw: dict) -> Page:
 
 
 def parse_frame_listing(html: str, base_url: str) -> list[str]:
-    """URLs de los fotogramas de un directorio de SVS, en orden."""
-    names = re.findall(r'href="?([^"\s>/]+\.(?:png|jpg))', html)
+    """URLs de los fotogramas de un directorio de SVS, del más antiguo al más reciente.
+
+    Según la página, los enlaces son relativos ("0001.png") o rutas absolutas
+    ("/vis/.../frame.001.exr"); se resuelven y se descartan los que no cuelgan del
+    directorio (iconos y demás imágenes de la plantilla).
+    """
     base = base_url.rstrip("/") + "/"
-    return [urljoin(base, name) for name in sorted(dict.fromkeys(names))]
+    links = re.findall(r'href="?([^"\s>]+\.(?:png|jpg|exr))', html)
+    urls = dict.fromkeys(urljoin(base, link) for link in links)
+    return sorted((url for url in urls if url.startswith(base)), key=_frame_order)
+
+
+def _frame_order(url: str) -> tuple[int, ...]:
+    """Orden por los números del nombre de archivo (".999" va antes que ".1000")."""
+    return tuple(int(number) for number in re.findall(r"\d+", url.rsplit("/", 1)[-1]))
 
 
 class SvsClient:
-    def __init__(self, get: Callable[[str], bytes] = http_get) -> None:
+    def __init__(
+        self,
+        get: Callable[[str], bytes] = http_get,
+        last_modified: Callable[[str], datetime] = http_last_modified,
+    ) -> None:
         self._get = get
+        self._last_modified = last_modified
 
     def page(self, page_id: int) -> Page:
         return parse_page(json.loads(self._get(f"{API_URL}{page_id}")))
@@ -75,3 +91,7 @@ class SvsClient:
 
     def download(self, url: str) -> bytes:
         return self._get(url)
+
+    def last_modified(self, url: str) -> datetime:
+        """Cuándo cambió por última vez un archivo (UTC): sirve para detectar un render nuevo."""
+        return self._last_modified(url)
