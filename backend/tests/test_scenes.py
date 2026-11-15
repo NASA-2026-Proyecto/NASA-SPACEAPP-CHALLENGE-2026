@@ -5,10 +5,11 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import Settings
-from app.main import create_app
+from app.factory import create_app
+from app.services.aerosol_scene import SPECIES, AerosolSource
 from app.services.geosfp import parse_dods
-from app.services.scenes import SPECIES, SceneStore
+from app.services.scenes import SceneStore
+from tests.conftest import make_settings
 from tests.fakes import FakeGeosFp, dods
 
 MANIFEST = "/api/scenes/aerosol-latest/manifest.json"
@@ -21,12 +22,12 @@ def nasa() -> FakeGeosFp:
 
 @pytest.fixture
 def store(nasa) -> SceneStore:
-    return SceneStore(nasa.client(), steps=3)
+    return SceneStore(AerosolSource(nasa.client(), steps=3))
 
 
 @pytest.fixture
 def api(store) -> TestClient:
-    return TestClient(create_app(Settings(cors_origins=[]), scenes=store))
+    return TestClient(create_app(make_settings(), scenes={"aerosol-latest": store}))
 
 
 # --- Cliente GEOS-FP ---------------------------------------------------------------
@@ -59,7 +60,7 @@ def test_dods_with_unexpected_size_is_rejected():
 def test_scene_matches_the_frontend_format(store):
     store.refresh()
     scene = store.get()
-    manifest = scene.manifest
+    manifest = scene.manifest.model_dump(exclude_none=True)
 
     # Lo que valida frontend/js/data/scene-data.js
     assert manifest["schema_version"] == 2
@@ -117,7 +118,7 @@ def test_new_step_replaces_the_scene_and_keeps_the_previous_files(store, nasa):
     new = store.get()
 
     assert new.version != old.version
-    assert new.manifest["time"]["stamps_utc"][-1] == "2026-02-28T07:30Z"
+    assert new.manifest.model_dump(exclude_none=True)["time"]["stamps_utc"][-1] == "2026-02-28T07:30Z"
     assert store.file(old.version, "dust.f32") == old.files["dust.f32"]
     assert store.file(new.version, "dust.f32") == new.files["dust.f32"]
 
@@ -147,14 +148,19 @@ def test_invalid_values_are_not_published(store, nasa, bad):
 
 def test_manifest_is_503_while_the_scene_is_not_ready(nasa):
     nasa.fail = True
-    store = SceneStore(nasa.client())
+    store = SceneStore(AerosolSource(nasa.client()))
     store.refresh()
-    api = TestClient(create_app(Settings(cors_origins=[]), scenes=store))
+    api = TestClient(create_app(make_settings(), scenes={"aerosol-latest": store}))
 
     response = api.get(MANIFEST)
     assert response.status_code == 503
     assert response.headers["retry-after"] == "5"
-    assert response.json()["status"] == "building"
+    assert response.headers["cache-control"] == "no-store"
+    # El cliente recibe un mensaje fijo; el motivo real (interno) no sale del servidor
+    assert response.json() == {
+        "detail": "Preparando los datos de la NASA; vuelve a intentarlo en unos segundos."
+    }
+    assert "NASA no responde" in store.error
 
 
 def test_manifest_and_files_are_served(api, store):

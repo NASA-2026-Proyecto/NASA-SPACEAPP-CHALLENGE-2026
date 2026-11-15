@@ -1,7 +1,50 @@
 import { LAYERS } from '../config.js';
-import { isLayerAvailable } from '../core/layers.js';
-import { store, setLayerVisible, setLayerOpacity, setLayerSpecies } from '../state/app-store.js';
+import { findScene } from '../catalog/scenes.js';
+import { isLayerAvailable, sceneIdOf } from '../core/layers.js';
+import {
+  store,
+  setLayerVisible,
+  setLayerOpacity,
+  setLayerSpecies,
+  setScenePlaying,
+} from '../state/app-store.js';
 import { icon } from './icons.js';
+
+const STAMP_FORMAT = new Intl.DateTimeFormat('es-ES', {
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZone: 'UTC',
+});
+
+const toDate = (stamp) => new Date(stamp.replace('Z', ':00Z'));
+
+// Qué tramo recorre la animación y por dónde va. Cadena vacía si no hay nada que animar.
+function animationNote(layer, state) {
+  const info = state.sceneInfo[sceneIdOf(layer, state.species[layer.id])];
+  if (!info || !state.layers[layer.id] || info.stamps.length < 2) return '';
+  const hours = (toDate(info.stamps.at(-1)) - toDate(info.stamps[0])) / 3_600_000;
+  // Series de varios días (incendios) en días; las demás, en horas
+  const inDays = hours >= 48;
+  const span = Math.round(inDays ? hours / 24 : hours);
+  const unit = (count) => (inDays ? (count === 1 ? 'día' : 'días') : 'h');
+  const range = `${inDays ? 'Últimos' : 'Últimas'} ${span} ${unit(span)}`;
+  if (!state.scenePlaying) return `${range} · en pausa en el último dato`;
+  const back = Math.round((1 - state.sceneProgress) * span);
+  return `${range} · ${back === 0 ? 'último dato' : `${back} ${unit(back)} antes`}`;
+}
+
+// Qué se está viendo y de cuándo es: cada fuente tiene su propia fecha.
+function sceneNote(layer, state) {
+  const sceneId = sceneIdOf(layer, state.species[layer.id]);
+  if (!sceneId || !state.layers[layer.id]) return '';
+  const scene = findScene(sceneId);
+  const info = state.sceneInfo[sceneId];
+  if (!info) return `${scene.source} · cargando datos de la NASA…`;
+  const stamp = STAMP_FORMAT.format(toDate(info.stamps.at(-1)));
+  return `${scene.source} · ${scene.stampLabel} ${stamp} UTC`;
+}
 
 function buildSpeciesGroup(layer, isAvailable) {
   const groupId = `layer-${layer.id}-species`;
@@ -144,16 +187,47 @@ export function initLayerPanel(listElement) {
 
     let speciesButtons = null;
     let speciesUi = null;
+    let note = null;
+    let animation = null;
+    let animationButton = null;
+    let animationLabel = null;
     if (layer.species) {
       speciesUi = buildSpeciesGroup(layer, isAvailable);
       speciesButtons = speciesUi.buttons;
+      note = document.createElement('p');
+      note.className = 'ej-layer__note';
+      note.setAttribute('aria-live', 'polite');
+
+      // Animación: botón de pausa y rótulo del tramo (sin aria-live: cambia varias veces por segundo)
+      animation = document.createElement('div');
+      animation.className = 'ej-layer__anim';
+      animationButton = document.createElement('button');
+      animationButton.type = 'button';
+      animationButton.className = 'ej-layer__anim-button';
+      animationButton.addEventListener('click', () =>
+        setScenePlaying(!store.getState().scenePlaying)
+      );
+      animationLabel = document.createElement('span');
+      animationLabel.className = 'ej-layer__anim-label';
+      animation.append(animationButton, animationLabel);
+      body.append(note, animation);
     }
 
     item.append(tile, body, input);
     if (speciesUi) item.append(speciesUi.wrap);
     listElement.append(item);
     rows.set(layer.id, {
-      item, input, slider, amount, speciesButtons, speciesUi, species: layer.species,
+      layer,
+      item,
+      input,
+      slider,
+      amount,
+      speciesButtons,
+      speciesUi,
+      note,
+      animation,
+      animationButton,
+      animationLabel,
     });
   }
 
@@ -175,11 +249,21 @@ export function initLayerPanel(listElement) {
           button.setAttribute('aria-checked', String(active));
           button.tabIndex = active ? 0 : -1;
         }
-        const current = row.species.find((species) => species.id === activeId);
+        const current = row.layer.species.find((species) => species.id === activeId);
         if (current) {
           row.speciesUi.toggleName.textContent = current.label;
           row.speciesUi.toggle.style.setProperty('--species-color', current.color);
         }
+        const text = sceneNote(row.layer, state);
+        if (row.note.textContent !== text) row.note.textContent = text;
+        row.note.hidden = text === '';
+
+        const moving = animationNote(row.layer, state);
+        row.animation.hidden = moving === '';
+        if (row.animationLabel.textContent !== moving) row.animationLabel.textContent = moving;
+        const playing = state.scenePlaying;
+        row.animationButton.textContent = playing ? '⏸' : '▶';
+        row.animationButton.setAttribute('aria-label', playing ? 'Pausar la animación' : 'Reproducir la animación');
       }
     }
   };

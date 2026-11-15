@@ -1,176 +1,306 @@
-"""Escena "en vivo" de aerosoles: los últimos pasos de GEOS-FP en el formato de escenas del front.
+"""Escenas: el formato común con el que los datos en malla llegan al front.
 
-El formato (manifiesto schema_version 2 + un .f32 por especie) es el de
-backend/tools/build_scene.py, así que el front la carga igual que una escena estática.
-La escena se construye una vez por paso nuevo del modelo (cada 3 h) y se guarda en
-memoria: ningún clic del usuario espera a la NASA.
+Una escena es un manifiesto (`app.schemas.Manifest`) más un .f32 por especie: float32
+little-endian en orden [paso][lat][lon], de sur a norte y de oeste a este.
+
+Cada fuente (GEOS-FP, visualizaciones diarias del EIC...) sabe comprobar si hay datos
+nuevos y construir su escena (`SceneSource`). `SceneStore` guarda la escena en memoria
+y la renueva en segundo plano: ningún clic del usuario espera a la NASA.
+
+La escena vive en la memoria de este proceso. Con varias réplicas, cada una tendría la
+suya (y podrían no coincidir durante una actualización): hoy la API está pensada para
+una sola instancia.
 """
 
 import hashlib
 import logging
 import threading
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any, Protocol
 
 import numpy as np
+import numpy.typing as npt
 
-from app.services.geosfp import FILL_LIMIT, GeosFpClient, Grid
+from app.schemas import GridBlock, Manifest, ProvenanceValue, Scale, SpeciesEntry, TimeAxis
 
 logger = logging.getLogger(__name__)
 
-SCENE_ID = "aerosol-latest"
-STRIDE = 4  # 1 de cada 4 celdas: malla global de 1° x 1,25°
+type FloatArray = npt.NDArray[np.float32]
 
-# id -> (variable de GEOS-FP, máximo de la escala de color).
-# Escala fija (p99 del episodio global de julio de 2026) para que los colores sean
-# comparables entre actualizaciones.
-SPECIES: dict[str, tuple[str, float]] = {
-    "brown_carbon": ("brexttau", 0.432),
-    "black_carbon": ("bcexttau", 0.0418),
-    "dust": ("duexttau", 0.355),
-    "sea_salt": ("ssexttau", 0.163),
-    "sulfate": ("suexttau", 0.163),
-}
+GRID_REFERENCE = "values at the listed grid coordinates"
+GRID_ORDER = "[step][lat][lon], row-major; lat south to north, lon west to east"
 
 
 @dataclass(frozen=True)
 class Scene:
-    version: str  # marca del paso más reciente; forma parte de la URL de los .f32
-    manifest: dict
-    files: dict[str, bytes]  # "<especie>.f32" -> float32 little-endian, [paso][lat][lon]
+    """Una escena lista para servir."""
+
+    version: str  # forma parte de la URL de los .f32, que así se pueden cachear
+    manifest: Manifest
+    files: dict[str, bytes]  # "<especie>.f32" -> valores
 
 
-def _stamp(moment: datetime) -> str:
+class SceneSource[ContextT](Protocol):
+    """Origen de una escena: sabe si hay datos nuevos y cómo construirla.
+
+    `ContextT` es lo que `check()` averigua y `build()` necesita (por ejemplo, la malla
+    y el eje de tiempo actuales), para no pedirlo dos veces.
+    """
+
+    @property
+    def scene_id(self) -> str:
+        """Identificador de la escena en la URL (p. ej. "aerosol-latest")."""
+        ...
+
+    def check(self) -> tuple[str, ContextT]:
+        """Consulta barata: versión disponible en origen y lo necesario para construirla."""
+        ...
+
+    def build(self, version: str, context: ContextT) -> Scene:
+        """Descarga los datos y construye la escena. Puede tardar decenas de segundos."""
+        ...
+
+
+def stamp(moment: datetime) -> str:
+    """Instante en el formato de los manifiestos: 2026-11-14T13:30Z."""
     return f"{moment:%Y-%m-%dT%H:%M}Z"
 
 
-def latest_version(grid: Grid) -> str:
-    return f"{grid.time_at(grid.n_times - 1):%Y%m%dT%H%MZ}"
+def version_of(moment: datetime) -> str:
+    """Versión de una escena a partir del instante de sus datos: 20261114T1330Z."""
+    return f"{moment:%Y%m%dT%H%MZ}"
 
 
-def build_scene(client: GeosFpClient, grid: Grid, steps: int) -> Scene:
-    last = grid.n_times - 1
-    first = max(0, last - steps + 1)
-    version = latest_version(grid)
-
-    files: dict[str, bytes] = {}
-    species: dict[str, dict] = {}
-    shape: tuple[int, ...] = ()
-    for key, (variable, scale) in SPECIES.items():
-        values = client.fields(variable, grid, first, last, STRIDE)
-        if not np.isfinite(values).all() or (values >= FILL_LIMIT).any() or (values < 0).any():
-            raise ValueError(f"{variable}: contiene valores no válidos.")
-        shape = values.shape
-        data = values.tobytes()
-        files[f"{key}.f32"] = data
-        species[key] = {
-            "source_variable": variable,
-            "unit": "dimensionless",
-            "file": f"{version}/{key}.f32",
-            "dtype": "float32-little-endian",
-            "sha256": hashlib.sha256(data).hexdigest(),
-            "min": float(values.min()),
-            "max": float(values.max()),
-            "display_scale_max": scale,
-            "display_scale_method": "fixed: p99 of the global scene of 24-28 July 2026",
-        }
-
-    n_steps, n_lat, n_lon = shape
-    lon_step = grid.lon_step * STRIDE
-    manifest = {
-        "schema_version": 2,
-        "scene_id": SCENE_ID,
-        "version": version,
-        "generated_utc": _stamp(datetime.now(UTC)),
-        "layer": "aerosols",
-        "kind": "grid-series",
-        "provenance": {
-            "provider": "NASA GMAO",
-            "product": "GEOS FP tavg3_2d_aer_Nx (assimilation)",
-            "source_dataset": client.url,
-            "averaging": "3-hourly time average",
-            "subsampling": f"every {STRIDE}th lat and {STRIDE}th lon; values not averaged",
-            "data_kind": "model analysis, near real time",
-            "units_note": "dimensionless (optical depth at 550 nm); not declared by server",
-        },
-        "time": {
-            "steps": n_steps,
-            "step_minutes": int(grid.time_step.total_seconds() // 60),
-            "stamps_utc": [_stamp(grid.time_at(index)) for index in range(first, last + 1)],
-            "note": "3-hour time averages; the last stamp is the newest step served by NASA.",
-        },
-        "grid": {
-            "lat_min": grid.lat_min,
-            "lat_step": grid.lat_step * STRIDE,
-            "lon_min": grid.lon_min,
-            "lon_step": lon_step,
-            "n_lat": n_lat,
-            "n_lon": n_lon,
-            "lon_periodic": bool(np.isclose(lon_step * n_lon, 360.0)),
-            "reference": "values at the listed grid coordinates",
-            "order": "[step][lat][lon], row-major; lat south to north, lon west to east",
-        },
-        "species": species,
-    }
-    return Scene(version=version, manifest=manifest, files=files)
+def grid_block(
+    lat_min: float, lat_step: float, lon_min: float, lon_step: float, n_lat: int, n_lon: int
+) -> GridBlock:
+    """Describe una malla regular a partir de su primera celda, sus pasos y su tamaño."""
+    return GridBlock(
+        lat_min=lat_min,
+        lat_step=lat_step,
+        lon_min=lon_min,
+        lon_step=lon_step,
+        n_lat=n_lat,
+        n_lon=n_lon,
+        lon_periodic=bool(np.isclose(lon_step * n_lon, 360.0)),
+        reference=GRID_REFERENCE,
+        order=GRID_ORDER,
+    )
 
 
-class SceneStore:
-    """Guarda la escena actual y la renueva en segundo plano cuando la NASA publica un paso nuevo.
+def whole_globe_grid(n_lat: int, n_lon: int) -> GridBlock:
+    """Malla de una imagen que cubre todo el globo (de -90 a 90 y de -180 a 180).
 
-    Conserva también la anterior: un navegador que ya tenía el manifiesto viejo puede
-    terminar de descargar sus .f32 aunque haya habido una actualización entre medias.
+    Los valores están en el centro de cada celda, así que la primera latitud y la
+    primera longitud quedan media celda dentro del borde.
+    """
+    lat_step, lon_step = 180.0 / n_lat, 360.0 / n_lon
+    return grid_block(-90.0 + lat_step / 2, lat_step, -180.0 + lon_step / 2, lon_step, n_lat, n_lon)
+
+
+def time_axis(moments: Sequence[datetime], step_minutes: int, note: str) -> TimeAxis:
+    """Eje de tiempo de una escena a partir de los instantes de sus pasos, en orden."""
+    return TimeAxis(
+        steps=len(moments),
+        step_minutes=step_minutes,
+        stamps_utc=[stamp(moment) for moment in moments],
+        note=note,
+    )
+
+
+def encode_species(
+    version: str,
+    key: str,
+    values: FloatArray,
+    *,
+    source_variable: str,
+    unit: str,
+    display_scale_max: float,
+    display_scale_method: str,
+    long_name: str | None = None,
+    missing: str | None = None,
+    scale: Scale | None = None,
+) -> tuple[bytes, SpeciesEntry]:
+    """Serializa una especie y devuelve (bytes del .f32, su entrada del manifiesto).
+
+    Args:
+        version: Versión de la escena; va en la ruta del archivo.
+        key: Identificador de la especie (p. ej. "dust").
+        values: Valores con forma (pasos, latitudes, longitudes).
+        source_variable: Nombre de la variable en origen.
+        unit: Unidad de los valores.
+        display_scale_max: Valor con el que el front satura el color.
+        display_scale_method: Cómo se eligió ese valor.
+        long_name: Descripción larga, si la hay.
+        missing: Cómo se marcan los huecos, si puede haberlos.
+        scale: Escala de color original, si el front debe pintar con ella.
+    """
+    data = np.ascontiguousarray(values, dtype="<f4").tobytes()
+    entry = SpeciesEntry(
+        source_variable=source_variable,
+        long_name=long_name,
+        unit=unit,
+        missing=missing,
+        file=f"{version}/{key}.f32",
+        sha256=hashlib.sha256(data).hexdigest(),
+        min=float(np.nanmin(values)),
+        max=float(np.nanmax(values)),
+        scale=scale,
+        display_scale_max=display_scale_max,
+        display_scale_method=display_scale_method,
+    )
+    return data, entry
+
+
+def build_manifest(
+    *,
+    scene_id: str,
+    version: str,
+    layer: str,
+    provenance: dict[str, ProvenanceValue],
+    time: TimeAxis,
+    grid: GridBlock,
+    species: dict[str, SpeciesEntry],
+) -> Manifest:
+    """Monta el manifiesto de una escena; es el único sitio donde se construye."""
+    return Manifest(
+        scene_id=scene_id,
+        version=version,
+        generated_utc=stamp(datetime.now(UTC)),
+        layer=layer,
+        provenance=provenance,
+        time=time,
+        grid=grid,
+        species=species,
+    )
+
+
+def _spawn_thread(task: Callable[[], None]) -> None:
+    """Ejecuta `task` en un hilo que no impide cerrar el proceso."""
+    threading.Thread(target=task, name="scene-refresh", daemon=True).start()
+
+
+class SceneStore[ContextT]:
+    """Guarda la escena actual de una fuente y la renueva cuando en origen hay una versión nueva.
+
+    La renovación es perezosa: se lanza en segundo plano cuando alguien pide la escena y
+    ha pasado el intervalo de comprobación. Nunca hay dos renovaciones a la vez.
+
+    Conserva también la escena anterior: un navegador que ya tenía el manifiesto viejo
+    puede terminar de descargar sus .f32 aunque haya habido una actualización entre medias.
     """
 
     def __init__(
         self,
-        client: GeosFpClient,
-        steps: int = 3,
+        source: SceneSource[ContextT],
+        *,
         check_seconds: float = 900.0,
         retry_seconds: float = 30.0,
+        clock: Callable[[], float] = time.monotonic,
+        spawn: Callable[[Callable[[], None]], None] = _spawn_thread,
     ) -> None:
-        self._client = client
-        self._steps = steps
+        """Crea el almacén, aún sin escena.
+
+        Args:
+            source: De dónde sale la escena.
+            check_seconds: Cada cuánto se comprueba si hay una versión nueva.
+            retry_seconds: Cuánto se espera para reintentar tras un fallo.
+            clock: Reloj monótono, en segundos (se sustituye en los tests).
+            spawn: Cómo ejecutar la renovación en segundo plano (se sustituye en los tests).
+        """
+        self._source = source
         self._check_seconds = check_seconds
         self._retry_seconds = retry_seconds
+        self._clock = clock
+        self._spawn = spawn
         self._lock = threading.Lock()
         self._refreshing = False
+        self._next_check = 0.0
         self._current: Scene | None = None
         self._previous: Scene | None = None
-        self._next_check = 0.0  # reloj monótono
-        self.error: str | None = None
+        self._error: str | None = None
+
+    @property
+    def scene_id(self) -> str:
+        """Identificador de la escena que guarda."""
+        return self._source.scene_id
+
+    @property
+    def error(self) -> str | None:
+        """Motivo del último fallo al renovar, o None si la última renovación fue bien."""
+        with self._lock:
+            return self._error
 
     def get(self) -> Scene | None:
         """Devuelve la escena disponible (o None) sin esperar; lanza la renovación si toca."""
+        if self._claim(only_if_due=True):
+            try:
+                self._spawn(self._run)
+            except Exception:
+                logger.exception("No se pudo lanzar la renovación de la escena %s", self.scene_id)
+                self._release(self._retry_seconds)
         with self._lock:
-            due = not self._refreshing and time.monotonic() >= self._next_check
-            if due:
-                self._refreshing = True
-        if due:
-            threading.Thread(target=self.refresh, name="scene-refresh", daemon=True).start()
-        return self._current
+            return self._current
 
     def file(self, version: str, name: str) -> bytes | None:
-        for scene in (self._current, self._previous):
+        """Bytes de un archivo de la escena actual o de la anterior; None si no existe."""
+        with self._lock:
+            scenes = (self._current, self._previous)
+        for scene in scenes:
             if scene is not None and scene.version == version:
                 return scene.files.get(name)
         return None
 
-    def refresh(self) -> None:
-        """Comprueba si hay un paso nuevo y, si lo hay, construye la escena. Bloquea."""
+    def refresh(self) -> bool:
+        """Renueva la escena ahora mismo, esperando a que termine.
+
+        Returns:
+            False si ya había una renovación en marcha (y por tanto no se ha hecho otra).
+        """
+        if not self._claim(only_if_due=False):
+            return False
+        self._run()
+        return True
+
+    def _claim(self, *, only_if_due: bool) -> bool:
+        """Reserva el turno de renovación; False si está ocupado o aún no toca."""
+        with self._lock:
+            if self._refreshing or (only_if_due and self._clock() < self._next_check):
+                return False
+            self._refreshing = True
+            return True
+
+    def _release(self, delay: float) -> None:
+        """Libera el turno y fija cuándo se vuelve a comprobar."""
+        with self._lock:
+            self._next_check = self._clock() + delay
+            self._refreshing = False
+
+    def _run(self) -> None:
+        """Comprueba si hay una versión nueva y, si la hay, construye la escena."""
+        delay = self._retry_seconds
         try:
-            grid = self._client.grid()
-            current = self._current
-            if current is None or current.version != latest_version(grid):
-                scene = build_scene(self._client, grid, self._steps)
+            version, context = self._source.check()
+            with self._lock:
+                current = self._current
+            if current is None or current.version != version:
+                scene = self._source.build(version, context)
                 with self._lock:
                     self._previous, self._current = current, scene
-                logger.info("Escena %s lista: %s", SCENE_ID, scene.version)
-            delay, self.error = self._check_seconds, None
+                logger.info("Escena %s lista: %s", self.scene_id, scene.version)
+            with self._lock:
+                self._error = None
+            delay = self._check_seconds
         except Exception as error:  # la NASA falla a ratos: se conserva la escena anterior
-            logger.warning("No se pudo renovar la escena %s: %r", SCENE_ID, error)
-            delay, self.error = self._retry_seconds, f"{type(error).__name__}: {error}"
-        with self._lock:
-            self._next_check = time.monotonic() + delay
-            self._refreshing = False
+            logger.warning("No se pudo renovar la escena %s: %r", self.scene_id, error)
+            with self._lock:
+                self._error = f"{type(error).__name__}: {error}"
+        finally:
+            self._release(delay)
+
+
+# Almacenes de la aplicación, por identificador de escena (cada uno con su tipo de contexto)
+type SceneStores = dict[str, SceneStore[Any]]
