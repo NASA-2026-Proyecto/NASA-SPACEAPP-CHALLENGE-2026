@@ -2,8 +2,9 @@ import json
 from pathlib import Path
 
 import numpy as np
-from backend.geosfp.grid import regular_step
 import xarray as xr
+
+from geosfp.grid import regular_step
 
 SPECIES = {
     "bcexttau": ("black_carbon", "Black Carbon"),
@@ -14,7 +15,6 @@ SPECIES = {
 }
 SIGNIFICANT_DIGITS = 5
 SCHEMA_VERSION = 1
-
 
 
 def _validate(variable: str, values: np.ndarray, shape: tuple[int, int]) -> None:
@@ -36,9 +36,12 @@ def normalize(source: Path, destination: Path) -> dict:
         lon = ds["lon"].values
         shape = (lat.size, lon.size)
         grid = {
-            "lat_min": float(lat[0]), "lat_step": regular_step(lat, "lat"),
-            "lon_min": float(lon[0]), "lon_step": regular_step(lon, "lon"),
-            "n_lat": int(lat.size), "n_lon": int(lon.size),
+            "lat_min": float(lat[0]),
+            "lat_step": regular_step(lat, "lat"),
+            "lon_min": float(lon[0]),
+            "lon_step": regular_step(lon, "lon"),
+            "n_lat": int(lat.size),
+            "n_lon": int(lon.size),
             "order": "row-major; rows south to north, columns west to east",
         }
         species = {}

@@ -1,13 +1,13 @@
 import csv
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 
-from backend.geosfp.client import load_in_chunks, nearest_index, open_remote, time_axis
+from geosfp.client import load_in_chunks, nearest_index, open_remote, time_axis
 
-START = datetime(2026, 7, 14, tzinfo=timezone.utc)
-END = datetime(2026, 7, 31, tzinfo=timezone.utc)
+START = datetime(2026, 7, 14, tzinfo=UTC)
+END = datetime(2026, 7, 31, tzinfo=UTC)
 VARIABLE = "brexttau"
 EUROPE = {"lat": slice(35.0, 60.0), "lon": slice(-15.0, 20.0)}
 IBERIA = {"lat": slice(36.0, 44.0), "lon": slice(-10.0, 4.0)}
@@ -19,7 +19,7 @@ def main() -> None:
     ds = open_remote()
     times = time_axis(ds["time"].attrs, ds.sizes["time"])
     first, last = nearest_index(times, START), nearest_index(times, END)
-    steps = times[first:last + 1]
+    steps = times[first : last + 1]
     print(f"Pasos: {len(steps)} | {steps[0]:%Y-%m-%d %H:%M} -> {steps[-1]:%Y-%m-%d %H:%M} UTC")
 
     europe = load_in_chunks(ds[VARIABLE].isel(time=slice(first, last + 1)).sel(EUROPE))
@@ -33,12 +33,14 @@ def main() -> None:
     iberia = europe.sel(IBERIA).values.astype("float64")
     rows = []
     for i, moment in enumerate(steps):
-        rows.append({
-            "time_utc": f"{moment:%Y-%m-%dT%H:%M}Z",
-            "europe_max": float(values[i].max()),
-            "iberia_mean": float(iberia[i].mean()),
-            "iberia_max": float(iberia[i].max()),
-        })
+        rows.append(
+            {
+                "time_utc": f"{moment:%Y-%m-%dT%H:%M}Z",
+                "europe_max": float(values[i].max()),
+                "iberia_mean": float(iberia[i].mean()),
+                "iberia_max": float(iberia[i].max()),
+            }
+        )
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     with OUT.open("w", newline="", encoding="utf-8") as handle:
@@ -49,8 +51,10 @@ def main() -> None:
 
     print("\nTop 8 pasos por media sobre Iberia:")
     for row in sorted(rows, key=lambda r: r["iberia_mean"], reverse=True)[:8]:
-        print(f"  {row['time_utc']}  media={row['iberia_mean']:.4f}  "
-              f"máx={row['iberia_max']:.4f}  Europa máx={row['europe_max']:.4f}")
+        print(
+            f"  {row['time_utc']}  media={row['iberia_mean']:.4f}  "
+            f"máx={row['iberia_max']:.4f}  Europa máx={row['europe_max']:.4f}"
+        )
 
 
 if __name__ == "__main__":

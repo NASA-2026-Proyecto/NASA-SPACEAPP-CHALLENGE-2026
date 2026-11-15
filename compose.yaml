@@ -1,0 +1,37 @@
+# Earth Jukebox: front (nginx) + API (FastAPI).
+#
+#   Producción local:  docker compose up --build
+#   Desarrollo:        docker compose -f compose.yaml -f compose.dev.yaml up --build
+#
+# Todo se publica en un único origen, http://localhost:${FRONTEND_PORT}: nginx sirve el
+# front y reenvía /api/* al backend, que no expone ningún puerto propio.
+# Las variables (${...}) se leen del .env de esta carpeta (ver .env.example).
+
+name: earth-jukebox
+
+services:
+  backend:
+    build:
+      context: ./backend
+      target: prod
+    image: earth-jukebox-backend:latest
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGINS: ${CORS_ORIGINS:-[]}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      target: prod
+    image: earth-jukebox-frontend:latest
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports:
+      # Solo accesible desde este equipo; quitar "127.0.0.1:" para abrirlo a la red local
+      - "127.0.0.1:${FRONTEND_PORT:-8080}:8080"
+    # Solo el orden de arranque: nginx resuelve el backend en cada petición,
+    # así que no se cae si la API tarda en arrancar o se reinicia
+    depends_on:
+      - backend
+    restart: unless-stopped

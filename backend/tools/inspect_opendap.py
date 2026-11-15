@@ -1,12 +1,14 @@
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import xarray as xr
 
-BASE = ("https://opendap.nccs.nasa.gov/dods/GEOS-5/fp/0.25_deg/seamless/"
-        "tavg3_2d_aer_Nx/tavg3_2d_aer_Nx.20261101_00")
-TARGET = datetime(2026, 11, 1, 4, 30, tzinfo=timezone.utc)
+BASE = (
+    "https://opendap.nccs.nasa.gov/dods/GEOS-5/fp/0.25_deg/seamless/"
+    "tavg3_2d_aer_Nx/tavg3_2d_aer_Nx.20261101_00"
+)
+TARGET = datetime(2026, 11, 1, 4, 30, tzinfo=UTC)
 SPECIES = ["bcexttau", "duexttau", "ssexttau", "suexttau", "totexttau"]
 FILL_LIMIT = 1.0e14
 
@@ -22,7 +24,7 @@ def open_remote(url: str) -> xr.Dataset:
 
 
 def grads_time_axis(attrs: dict, size: int) -> list[datetime]:
-    start = datetime.strptime(attrs["grads_min"], "%H:%Mz%d%b%Y").replace(tzinfo=timezone.utc)
+    start = datetime.strptime(attrs["grads_min"], "%H:%Mz%d%b%Y").replace(tzinfo=UTC)
     minutes = int(attrs["grads_step"].removesuffix("mn"))
     return [start + timedelta(minutes=minutes * i) for i in range(size)]
 
@@ -43,8 +45,10 @@ def main(url: str) -> None:
         print(f"\n{name} ({snapshot[name].attrs.get('long_name', '').strip()})")
         print(f"  celdas: {values.size} | válidas: {valid.size} | ausentes: {values.size - valid.size}")
         if valid.size:
-            print(f"  min={valid.min():.4g}  p50={np.percentile(valid, 50):.4g}  "
-                  f"p99={np.percentile(valid, 99):.4g}  max={valid.max():.4g}")
+            print(
+                f"  min={valid.min():.4g}  p50={np.percentile(valid, 50):.4g}  "
+                f"p99={np.percentile(valid, 99):.4g}  max={valid.max():.4g}"
+            )
 
 
 if __name__ == "__main__":

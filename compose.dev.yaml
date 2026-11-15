@@ -1,0 +1,32 @@
+# Ajustes de desarrollo sobre compose.yaml (se combinan, no lo sustituyen):
+#   docker compose -f compose.yaml -f compose.dev.yaml up --build
+#
+# - backend: imagen "dev" con uvicorn --reload y el repo montado en /workspace
+# - frontend: nginx sin caché sirviendo los ficheros del host (recargar la página basta)
+
+services:
+  backend:
+    build:
+      target: dev
+    image: earth-jukebox-backend:dev
+    volumes:
+      - .:/workspace:cached
+    environment:
+      # Los cambios en ficheros de Windows no generan eventos dentro de Linux: sondear
+      WATCHFILES_FORCE_POLLING: "true"
+    ports:
+      # Acceso directo a la API (y a /api/docs) sin pasar por nginx, útil para depurar
+      - "127.0.0.1:8000:8000"
+
+  frontend:
+    build:
+      target: dev
+    image: earth-jukebox-frontend:dev
+    # Mismos ficheros que copia la imagen prod, en solo lectura; no se monta frontend/
+    # entero para no publicar Dockerfile ni la configuración de nginx
+    volumes:
+      - ./frontend/index.html:/usr/share/nginx/html/index.html:ro
+      - ./frontend/explorer.html:/usr/share/nginx/html/explorer.html:ro
+      - ./frontend/css:/usr/share/nginx/html/css:ro
+      - ./frontend/js:/usr/share/nginx/html/js:ro
+      - ./frontend/assets:/usr/share/nginx/html/assets:ro

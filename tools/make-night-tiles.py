@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["numpy", "pillow"]
+# ///
 """
 Genera las teselas del modo noche a partir del mapa de luces nocturnas de la NASA.
 
 Entrada : earth_nightlights_10K.tif  (equirrectangular, luces blancas sobre negro)
-Salida  : assets/tiles/nightlights/{z}/{x}/{y}.webp  (Web Mercator, 512 px, con transparencia)
+Salida  : frontend/assets/tiles/nightlights/{z}/{x}/{y}.webp  (Web Mercator, 512 px, con transparencia)
 
-Uso (desde la raíz del proyecto):
-    pip install pillow numpy
-    python tools/make-night-tiles.py ruta/a/earth_nightlights_10K.tif
+Uso (desde cualquier carpeta; uv instala numpy y pillow al vuelo):
+    uv run tools/make-night-tiles.py ruta/a/earth_nightlights_10K.tif
 
 Solo hace falta volver a ejecutarlo si se cambia el mapa de origen o los colores.
 """
@@ -17,7 +20,8 @@ from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
 SRC = sys.argv[1] if len(sys.argv) > 1 else "earth_nightlights_10K.tif"
-OUT = os.path.join("assets", "tiles", "nightlights")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.join(REPO_ROOT, "frontend", "assets", "tiles", "nightlights")
 TILE = 512          # tamaño de cada tesela (en el mapa: tileSize 512)
 MAX_Z = 4           # zoom máximo de teselas (mundo de 8192 px)
 

@@ -1,5 +1,35 @@
-data/raw/
+# --- Secrets / local configuration ------------------------------------------
+.env
+.env.*
+!.env.example
 
-for pattern in ".DS_Store" "__pycache__/" "*.pyc" "data/raw/" "data/processed/"; do
-  grep -qxF "$pattern" .gitignore || echo "$pattern" >> .gitignore
-done
+# --- Python / uv --------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Editors ------------------------------------------------------------------
+# Shared VS Code settings (debug configs, recommended extensions) are versioned
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+
+# --- OS -----------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Tool inputs that are too large for the repo -------------------------------
+# Source image for tools/make-night-tiles.py
+*.tif
+
+# --- Data pipeline (backend/tools) ----------------------------------------------
+# Intermediate downloads and outputs of the GEOS-FP scripts
+data/raw/
+data/processed/

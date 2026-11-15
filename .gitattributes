@@ -1,0 +1,24 @@
+# Text is stored with LF in the repo; Windows checkouts may still use CRLF on disk
+* text=auto
+
+# Files executed or parsed inside Linux containers: always LF, on every OS
+*.sh          text eol=lf
+*.envsh       text eol=lf
+*.conf        text eol=lf
+*.template    text eol=lf
+Dockerfile    text eol=lf
+*.Dockerfile  text eol=lf
+*.yaml        text eol=lf
+*.yml         text eol=lf
+*.toml        text eol=lf
+*.lock        text eol=lf
+*.py          text eol=lf
+
+# Binary assets: never diff or normalise
+*.png    binary
+*.jpg    binary
+*.webp   binary
+*.woff2  binary
+*.npy    binary
+*.tif    binary
+*.f32    binary

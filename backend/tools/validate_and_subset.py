@@ -1,13 +1,17 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 
-from backend.geosfp.client import (
-    DATASET_URL, load_snapshot, nearest_index, open_remote, time_axis,
+from geosfp.client import (
+    DATASET_URL,
+    load_snapshot,
+    nearest_index,
+    open_remote,
+    time_axis,
 )
 
-TARGET = datetime(2026, 11, 1, 4, 30, tzinfo=timezone.utc)
+TARGET = datetime(2026, 11, 1, 4, 30, tzinfo=UTC)
 SAVED = ["bcexttau", "duexttau", "ssexttau", "suexttau", "totexttau"]
 EXTRA = ["ocexttau", "brexttau", "niexttau"]
 WITH_BR = ["bcexttau", "ocexttau", "brexttau", "niexttau", "duexttau", "ssexttau", "suexttau"]
