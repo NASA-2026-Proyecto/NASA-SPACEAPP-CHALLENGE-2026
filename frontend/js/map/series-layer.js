@@ -1,69 +1,25 @@
 import { createResampler } from '../data/scene-data.js';
+import { buildGeometry } from './scene-geometry.js';
+import { createRasterPainter } from './painters/raster-painter.js';
+import { createEmberPainter, EMBER_CANVAS_WIDTH } from './painters/ember-painter.js';
+import { FIELD_MATERIALS } from './painters/materials.js';
 
-const GAMMA = 0.5;
-const MAX_ALPHA = 0.92;
-const FLOOR = 0.04;
-const FEATHER_CELLS = 12;
-const MERCATOR_MAX_LAT = 85.0511287798;
-const MAX_CANVAS_WIDTH = 1100; // el lienzo se vuelve a subir a la GPU en cada fotograma
-const RAMP_SIZE = 256;
-// Escalas con rampa (posición 0..1): por debajo de `clear` es transparente y a partir de
-// `solid` tiene la opacidad máxima. En la logarítmica (un campo continuo, como el PM2.5)
-// el aire limpio deja ver el mapa; en la lineal (datos puntuales, como los incendios)
-// cualquier valor por encima de cero se ve. `sparse` es para una escala logarítmica cuyo
-// dato solo cubre parte del mapa (la precipitación): se ve desde el extremo bajo de la
-// escala. La especie lo pide en el catálogo con `fade: 'sparse'`.
-const RAMP_FADE = {
-  log: { clear: 0.08, solid: 0.45 },
-  linear: { clear: 0.01, solid: 0.12 },
-  sparse: { clear: 0, solid: 0.2 },
-};
+// Ancho máximo del lienzo (se vuelve a subir a la GPU en cada fotograma): un campo liso
+// no gana nada con más píxeles que celdas; una textura sí.
+const FIELD_CANVAS_WIDTH = 1100;
+const TEXTURED_CANVAS_WIDTH = 1440;
 
-const smooth = (t) => t * t * (3 - 2 * t);
-const mercatorY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
-const latFromMercatorY = (y) => (Math.atan(Math.sinh(y)) * 180) / Math.PI;
-const hexToRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-
-function buildGeometry(grid) {
-  const periodic = Boolean(grid.lon_periodic);
-  const west = grid.lon_min;
-  const east = periodic ? grid.lon_min + 360 : grid.lon_min + (grid.n_lon - 1) * grid.lon_step;
-  const south = Math.max(grid.lat_min, -MERCATOR_MAX_LAT);
-  const north = Math.min(grid.lat_min + (grid.n_lat - 1) * grid.lat_step, MERCATOR_MAX_LAT);
-  const wanted = periodic ? 3 : 4;
-  const pixelsPerCell = Math.max(1, Math.min(wanted, Math.round(MAX_CANVAS_WIDTH / grid.n_lon)));
-  const width = grid.n_lon * pixelsPerCell;
-  const spanY = mercatorY(north) - mercatorY(south);
-  const spanX = ((east - west) * Math.PI) / 180;
-  const height = Math.round((width * spanY) / spanX);
-  return { west, east, south, north, width, height, spanY, pixelsPerCell, periodic };
-}
-
-function buildPalette(species) {
-  return new Map(
-    species.map((item) => {
-      const base = hexToRgb(item.color);
-      const dark = base.map((v) => v * 0.6);
-      const light = base.map((v) => v + (255 - v) * 0.45);
-      return [item.id, { base, dark, light }];
-    })
-  );
-}
-
-// Tabla de colores a partir de las paradas de la rampa que publica el manifiesto
-// (los colores de la propia barra de la NASA), interpolando entre paradas.
-function buildRampTable(stops) {
-  const colors = stops.map(hexToRgb);
-  const table = new Uint8ClampedArray(RAMP_SIZE * 3);
-  for (let i = 0; i < RAMP_SIZE; i += 1) {
-    const position = (i / (RAMP_SIZE - 1)) * (colors.length - 1);
-    const low = Math.min(Math.floor(position), colors.length - 2);
-    const t = position - low;
-    for (let channel = 0; channel < 3; channel += 1) {
-      table[i * 3 + channel] = colors[low][channel] * (1 - t) + colors[low + 1][channel] * t;
-    }
+// Cómo se pinta cada especie, según su `material` en el catálogo (js/catalog/scenes.js):
+// brasas (incendios) o un campo, liso o con la textura de js/map/painters/materials.js.
+function painterKind(species) {
+  if (species.material === 'embers') {
+    return { create: createEmberPainter, canvasWidth: EMBER_CANVAS_WIDTH, usesWorkspace: false };
   }
-  return table;
+  if (species.material && !FIELD_MATERIALS[species.material]) {
+    throw new Error(`Material desconocido: ${species.material}`);
+  }
+  const canvasWidth = species.material ? TEXTURED_CANVAS_WIDTH : FIELD_CANVAS_WIDTH;
+  return { create: createRasterPainter, canvasWidth, usesWorkspace: true };
 }
 
 // Dibuja una escena (serie de mallas) como capa ráster sobre el globo.
@@ -75,7 +31,8 @@ function buildRampTable(stops) {
 // el más reciente. Cada paso se pinta una sola vez en su propio lienzo; entre dos pasos
 // se funden esos dos lienzos, que es barato y permite animar con fluidez.
 export function createSeriesLayer(map, { id, layerId, scene, species, beforeId }) {
-  const geometry = buildGeometry(scene.grid);
+  const canvasWidth = Math.max(...species.map((item) => painterKind(item).canvasWidth));
+  const geometry = buildGeometry(scene.grid, canvasWidth);
   const { width, height } = geometry;
   const lastStep = scene.time.steps - 1;
 
@@ -85,33 +42,40 @@ export function createSeriesLayer(map, { id, layerId, scene, species, beforeId }
   canvas.height = height;
   canvas.style.cssText = 'position:absolute;left:-9999px;top:0;';
   document.body.append(canvas);
-
   const context = canvas.getContext('2d');
-  const image = context.createImageData(width, height);
-  const lats = new Float64Array(height);
-  const lons = new Float64Array(width);
-  const yNorth = mercatorY(geometry.north);
-  for (let r = 0; r < height; r += 1) {
-    lats[r] = latFromMercatorY(yNorth - ((r + 0.5) / height) * geometry.spanY);
-  }
-  for (let c = 0; c < width; c += 1) {
-    lons[c] = geometry.west + ((c + 0.5) / width) * (geometry.east - geometry.west);
-  }
 
-  // Desvanecimiento en los bordes solo si el recorte es regional.
-  const featherPx = FEATHER_CELLS * geometry.pixelsPerCell;
-  const edgeFade = (index, size) =>
-    smooth(Math.min(1, Math.min(index + 0.5, size - index - 0.5) / featherPx));
-  const fadeRows = Float32Array.from({ length: height }, (_, r) =>
-    geometry.periodic ? 1 : edgeFade(r, height));
-  const fadeCols = Float32Array.from({ length: width }, (_, c) =>
-    geometry.periodic ? 1 : edgeFade(c, width));
-
-  const resample = createResampler(scene, lats, lons);
-  const field = new Float32Array(width * height);
-  const palette = buildPalette(species);
-  const fades = new Map(species.map((item) => [item.id, item.fade]));
-  const rampTables = new Map();
+  // Búferes de los pintores de campo: se crean la primera vez que alguno los necesita
+  const offscreen = () => {
+    const extra = document.createElement('canvas');
+    extra.width = width;
+    extra.height = height;
+    return extra;
+  };
+  let workspace = null;
+  const getWorkspace = () => {
+    workspace ??= {
+      field: new Float32Array(width * height),
+      density: new Float32Array(width * height),
+      image: context.createImageData(width, height),
+      layer: offscreen(), // el dato pintado, para dibujarlo encima de su nube
+      cloud: offscreen(),
+      resample: createResampler(scene, geometry.lats, geometry.lons),
+    };
+    return workspace;
+  };
+  const speciesById = new Map(species.map((item) => [item.id, item]));
+  const painters = new Map();
+  function painterOf(speciesId) {
+    if (!painters.has(speciesId)) {
+      const item = speciesById.get(speciesId);
+      const kind = painterKind(item);
+      painters.set(
+        speciesId,
+        kind.create(item, { scene, geometry, workspace: kind.usesWorkspace ? getWorkspace() : null })
+      );
+    }
+    return painters.get(speciesId);
+  }
 
   // Pasos ya pintados de la especie que se está viendo: índice de paso -> lienzo
   let stepCache = { speciesId: null, canvases: new Map() };
@@ -142,77 +106,15 @@ export function createSeriesLayer(map, { id, layerId, scene, species, beforeId }
     beforeId
   );
 
-  // Un solo color por especie: más claro y más opaco cuanto mayor es el valor.
-  function paintTint(id) {
-    const scale = scene.manifest.species[id].display_scale_max;
-    const { base, dark, light } = palette.get(id);
-    const data = image.data;
-    for (let r = 0; r < height; r += 1) {
-      for (let c = 0; c < width; c += 1) {
-        const i = r * width + c;
-        const offset = i * 4;
-        const normalized = field[i] / scale;
-        if (!(normalized > FLOOR)) {
-          data[offset + 3] = 0;
-          continue;
-        }
-        const shaped = Math.pow(Math.min((normalized - FLOOR) / (1 - FLOOR), 1), GAMMA);
-        const low = Math.min(shaped / 0.5, 1);
-        const high = Math.max((shaped - 0.5) / 0.5, 0);
-        for (let channel = 0; channel < 3; channel += 1) {
-          data[offset + channel] =
-            shaped < 0.5
-              ? dark[channel] + (base[channel] - dark[channel]) * low
-              : base[channel] + (light[channel] - base[channel]) * high;
-        }
-        data[offset + 3] = shaped * MAX_ALPHA * 255 * fadeRows[r] * fadeCols[c];
-      }
-    }
-  }
-
-  // Escala (logarítmica o lineal) con la rampa de colores original, la de la barra de
-  // la NASA. Los huecos (NaN: donde la imagen de origen no tenía dato) quedan transparentes.
-  function paintRamp(id, scale) {
-    if (!rampTables.has(id)) rampTables.set(id, buildRampTable(scale.ramp));
-    const table = rampTables.get(id);
-    const isLog = scale.kind === 'log';
-    const start = isLog ? Math.log(scale.min) : scale.min;
-    const span = (isLog ? Math.log(scale.max) : scale.max) - start;
-    const { clear, solid } = RAMP_FADE[fades.get(id) ?? scale.kind];
-    const data = image.data;
-    for (let r = 0; r < height; r += 1) {
-      for (let c = 0; c < width; c += 1) {
-        const i = r * width + c;
-        const offset = i * 4;
-        const position = ((isLog ? Math.log(field[i]) : field[i]) - start) / span;
-        if (!(position > clear)) {
-          data[offset + 3] = 0;
-          continue;
-        }
-        const clamped = Math.min(position, 1);
-        const entry = Math.round(clamped * (RAMP_SIZE - 1)) * 3;
-        data[offset] = table[entry];
-        data[offset + 1] = table[entry + 1];
-        data[offset + 2] = table[entry + 2];
-        const strength = smooth(Math.min((clamped - clear) / (solid - clear), 1));
-        data[offset + 3] = strength * MAX_ALPHA * 255 * fadeRows[r] * fadeCols[c];
-      }
-    }
-  }
-
   // Lienzo con un paso exacto de una especie (se pinta la primera vez y se guarda).
   function stepCanvas(id, step) {
     if (stepCache.speciesId !== id) stepCache = { speciesId: id, canvases: new Map() };
     let cached = stepCache.canvases.get(step);
     if (!cached) {
-      resample(id, step, field);
-      const scale = scene.manifest.species[id].scale;
-      if (scale?.ramp && RAMP_FADE[scale.kind]) paintRamp(id, scale);
-      else paintTint(id);
       cached = document.createElement('canvas');
       cached.width = width;
       cached.height = height;
-      cached.getContext('2d').putImageData(image, 0, 0);
+      painterOf(id)(cached.getContext('2d'), step);
       stepCache.canvases.set(step, cached);
     }
     return cached;
@@ -244,7 +146,7 @@ export function createSeriesLayer(map, { id, layerId, scene, species, beforeId }
 
   function sync(state) {
     speciesId = state.species[layerId];
-    visible = Boolean(state.layers[layerId]) && palette.has(speciesId);
+    visible = Boolean(state.layers[layerId]) && speciesById.has(speciesId);
     map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
     map.setPaintProperty(id, 'raster-opacity', state.opacity[layerId]);
     draw();

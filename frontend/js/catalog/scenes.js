@@ -5,7 +5,12 @@
 //   source      -> de dónde vienen los datos, en corto (se enseña en el panel)
 //   stampLabel  -> qué significa la fecha del manifiesto ("dato del" / "publicado el")
 //   species     -> id, label y color del botón; `fade: 'sparse'` si el dato solo cubre
-//                  parte del mapa y hasta su valor más bajo debe verse (js/map/series-layer.js)
+//                  parte del mapa y hasta su valor más bajo debe verse
+//                  (js/map/painters/raster-painter.js); `material`, el aspecto en el globo:
+//                  'embers' (puntos encendidos, js/map/painters/ember-painter.js) o una
+//                  textura de js/map/painters/materials.js ('haze', 'smoke', 'dust',
+//                  'mist', 'rain', 'snow'). El color también es el del punto del panel y
+//                  la barra de la ficha, así que tiene que leerse sobre fondo oscuro.
 export const SCENES = [
   {
     // Visualización diaria del Earth Information Center: el campo completo, "dónde y cuánto"
@@ -19,7 +24,7 @@ export const SCENES = [
       credit: 'NASA Scientific Visualization Studio',
       url: 'https://svs.gsfc.nasa.gov/5151/',
     },
-    species: [{ id: 'pm25', label: 'EIC PM 2.5', color: '#E8862E' }],
+    species: [{ id: 'pm25', label: 'EIC PM 2.5', color: '#E8862E', material: 'haze' }],
   },
   {
     // API casi en tiempo real: de qué están hechas las partículas
@@ -34,11 +39,11 @@ export const SCENES = [
       url: 'https://gmao.gsfc.nasa.gov/',
     },
     species: [
-      { id: 'brown_carbon', label: 'Brown Carbon', color: '#B8733A' },
-      { id: 'black_carbon', label: 'Black Carbon', color: '#D45F47' },
-      { id: 'dust', label: 'Dust', color: '#C39BDD' },
-      { id: 'sea_salt', label: 'Sea Salt', color: '#86ADAA' },
-      { id: 'sulfate', label: 'Sulfate', color: '#56E03A' },
+      { id: 'brown_carbon', label: 'Brown Carbon', color: '#C4894E', material: 'smoke' },
+      { id: 'black_carbon', label: 'Black Carbon', color: '#8E8780', material: 'smoke' },
+      { id: 'dust', label: 'Dust', color: '#E89A4C', material: 'dust' },
+      { id: 'sea_salt', label: 'Sea Salt', color: '#8FD3DC', material: 'mist' },
+      { id: 'sulfate', label: 'Sulfate', color: '#E2D27E', material: 'haze' },
     ],
   },
   {
@@ -53,7 +58,7 @@ export const SCENES = [
       credit: 'NASA Scientific Visualization Studio',
       url: 'https://svs.gsfc.nasa.gov/5113/',
     },
-    species: [{ id: 'frp', label: 'EIC Incendios', color: '#E3D43F' }],
+    species: [{ id: 'frp', label: 'EIC Incendios', color: '#FF6A1F', material: 'embers' }],
   },
   {
     // Visualización del EIC: precipitación de los satélites GPM (IMERG), cada media hora
@@ -68,8 +73,8 @@ export const SCENES = [
       url: 'https://svs.gsfc.nasa.gov/4285/',
     },
     species: [
-      { id: 'rain', label: 'Lluvia', color: '#60D300', fade: 'sparse' },
-      { id: 'snow', label: 'Nieve', color: '#4F9AFF', fade: 'sparse' },
+      { id: 'rain', label: 'Lluvia', color: '#60D300', fade: 'sparse', material: 'rain' },
+      { id: 'snow', label: 'Nieve', color: '#4F9AFF', fade: 'sparse', material: 'snow' },
     ],
   },
 ];
