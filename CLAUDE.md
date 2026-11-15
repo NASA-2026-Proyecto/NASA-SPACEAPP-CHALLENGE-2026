@@ -29,18 +29,19 @@ frontend/                 Static site = nginx web root (relative paths everywher
   explorer.html           Main app: MapLibre globe (js/pages/explorer.js)
   css/                    tokens.css (design tokens), base, components, landing, explorer, explorer-shell (panels, point card)
   js/
-    config.js             Layer catalog (LAYERS): id, label, icon, ramp, defaultOpacity. `kind: 'scene'` + `scenes` = data scenes
+    config.js             Layer catalog (LAYERS): id, label, icon, ramp, defaultOpacity, sound (the API sound heard on a click). `kind: 'scene'` + `scenes` = data scenes
                           (species = the buttons, each tagged with its sceneId; the first is the default). No scenes = "Pendiente"
     catalog/scenes.js     Scene catalog (SCENES): id, dataUrl (the API), source and stampLabel (shown in the panel), species (id, label, color, optional `fade: 'sparse'`)
-    core/layers.js        isSceneLayer(), isLayerAvailable(), sceneIdOf()
+    core/layers.js        isSceneLayer(), isLayerAvailable(), sceneIdOf(), activeLayer(state)
     data/scene-data.js    loadScene(baseUrl) (manifest + .f32, checks size and sha256), cellValueAt() (exact cell), sampleAt() (interpolated; not used yet), createResampler()
     data/scene-cache.js   getScene(sceneId): one shared download per scene; failures are not cached
     data/point-reading.js readPm25(), readAerosols(), levelOf(): the reading of a clicked point
     pages/                Page entry points (landing.js, explorer.js); explorer.js wires the panels, the click → reading flow and the point card
     map/                  globe-map.js (createGlobeMap → {map, flyTo, isOnGlobe, showMarker, hideMarker, destroy}), series-layer.js (scene → canvases → raster layer),
                           scene-animation.js (loop clock), night-lights.js, land-dots.js, hover-glow.js, auto-spin.js
-    ui/                   layer-panel, player (audio UI), waveform, point-card, mode-toggle, dialog, icons, globe-status
-    audio/                audio-engine.js (Web Audio: pitch/level from a value, one voice per aerosol species, trend cue), simulated-source.js
+    data/sound-api.js     fetchSoundReading() (what sounds at a point), fetchSoundClip() (the WAV; waits and retries on 503)
+    ui/                   layer-panel, player (sound of the clicked point), waveform, point-card, mode-toggle, dialog, icons, globe-status
+    audio/                clip-player.js (Web Audio: decodes and plays the clip made by the API, through an analyser)
     state/                store.js (tiny pub/sub store), app-store.js
     effects/              starfield.js, dotted-globe.js + globe/* (Three.js landing globe and shaders)
     core/                 animation-loop, motion (reduced motion), resize, pointer-parallax, css-tokens
@@ -51,7 +52,7 @@ backend/                  uv project (package = false: an app, run from backend/
   app/main.py             Entry point: `app = create_app()` (`uvicorn app.main:app`). Nothing else
   app/factory.py          create_app(settings, scenes) and default_scenes(settings): the only place where the app is wired
   app/config.py           Settings (pydantic-settings, env vars only): cors_origins, scene_steps (1–24, default 8), scene_warmup
-  app/schemas.py          API contract (Pydantic): Health, SceneList, Manifest, TimeAxis, GridBlock, Scale, SpeciesEntry
+  app/schemas.py          API contract (Pydantic): Health, SceneList, Manifest, TimeAxis, GridBlock, Scale, SpeciesEntry, SoundList, SoundReading
   app/api/__init__.py     router with prefix /api; includes health and scenes
   app/api/health.py       GET /api/health → {status, version}
   app/api/scenes.py       GET /api/scenes, /api/scenes/{scene_id}/manifest.json (503 + Retry-After while building), /{scene_id}/{version}/{species}.f32
@@ -61,6 +62,10 @@ backend/                  uv project (package = false: an app, run from backend/
   app/services/svs.py     SVS client: parse_page (`/api/{id}` JSON), parse_frame_listing, SvsClient
   app/services/colour_scale.py   Colour → value on images: read a colour bar (continuous, or stepped with `classes_from_colour_bar`), invert it, reject thin lines, drop islands, downsample, max_pool, fill small gaps
   app/services/exr.py     read_rgb(bytes): OpenEXR frame → linear float32 RGB
+  app/api/sounds.py       GET /api/sounds, /api/sounds/{sound}?lat=&lon= (what sounds there), /api/sounds/{sound}/{version}.wav?lat=&lon= (the audio)
+  app/services/sonification.py   SOUNDS registry (air, rain, fire), sample_point() (a point of a scene), Sonifier (read, render, cap on renders)
+  app/services/sound/     Synthesis, numpy only: dsp.py (noise, filters, grains, reverb, LUFS, WAV), common.py (PointSample, directions, Spanish text),
+                          air.py / rain.py / fire.py (each: mapping → parameters, describe → words, synthesize → audio)
   app/services/aerosol_scene.py  AerosolSource → `aerosol-latest` (GEOS-FP, 5 species)
   app/services/pm25_scene.py     Pm25Source → `pm25-latest` (EIC daily visualization SVS 5151)
   app/services/fire_scene.py     FireSource → `fires-latest` (EIC daily visualization SVS 5113)
@@ -69,9 +74,9 @@ backend/                  uv project (package = false: an app, run from backend/
                           episode (download to NetCDF), timeline (GrADS time axis, pure), stats (per-step statistics and CSV, pure),
                           validation, grid (grid description, reuses app.services.scenes), cli (argparse helpers)
   tools/                  OFFLINE command-line scripts: find_episode, summarize_episode, download_global_episode, build_scene
-  tests/                  pytest. conftest (isolated settings, fixtures), fakes.py / fake_svs.py / fake_fires.py / fake_precipitation.py (fake NASA), fixtures/ (real NASA responses),
+  tests/                  pytest. conftest (isolated settings, fixtures), fakes.py / fake_svs.py / fake_fires.py / fake_precipitation.py (fake NASA), fake_scenes.py (hand-made scenes), fixtures/ (real NASA responses),
                           test_app, test_http, test_scene_store, test_scenes (aerosol), test_pm25_scene, test_fire_scene, test_precipitation_scene, test_format_changes,
-                          test_real_responses, test_pipeline_* (offline pipeline)
+                          test_real_responses, test_sound_dsp, test_sounds, test_sonification, test_pipeline_* (offline pipeline)
   pyproject.toml  uv.lock  .python-version (3.13)  Dockerfile  .dockerignore
 tools/make-night-tiles.py PEP 723 script: `uv run tools/make-night-tiles.py <earth_nightlights_10K.tif>` → frontend/assets/tiles/nightlights
 compose.yaml              Production-like: backend (prod) + frontend (prod), only 127.0.0.1:${FRONTEND_PORT:-8080} published
@@ -90,7 +95,7 @@ compose.dev.yaml          Overrides: dev targets, repo bind-mounted at /workspac
 - Frontend has **no build step**: plain ES modules. Three.js comes from an importmap (jsdelivr `three@0.186.0`). MapLibre is imported by URL (`https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs`; it spawns its worker from unpkg via a `blob:` URL, which matters for any future CSP). Bootstrap 5.3.8 CSS comes from jsdelivr with SRI.
 - External services used by the browser (no keys): OpenFreeMap style `https://tiles.openfreemap.org/styles/dark` (unversioned), NASA GIBS WMTS (Blue Marble basemap), CDNs. Used by the backend: `svs.gsfc.nasa.gov` and `opendap.nccs.nasa.gov`, nothing else (`ALLOWED_HOSTS` in `http.py`).
 - Globe layer order (bottom → top): GIBS Blue Marble basemap → night lights (local tiles) → data layers → land dots (GeoJSON from earth-water.png) → labels. OpenFreeMap vector layers are hidden except place, water_name and boundary.
-- Frontend state: `app-store.js` holds `{layers, opacity, nightMode, species, scenePlaying, sceneProgress, sceneInfo, reading}`; UI modules subscribe and re-render. No framework.
+- Frontend state: `app-store.js` holds `{layers, opacity, nightMode, species, scenePlaying, sceneProgress, sceneInfo, reading}`; UI modules subscribe and re-render. No framework. **Only one data layer can be on**: `setLayerVisible` switches the others off, so what is seen and what is heard are always the same layer (`core/layers.js activeLayer`).
 
 ### Backend module map
 
@@ -99,12 +104,14 @@ Dependency direction is one way: `main → factory → api → services → sche
 | Layer | Modules | Job |
 |---|---|---|
 | Wiring | `factory.py`, `main.py` | Build the FastAPI app; choose which scenes exist |
-| HTTP routes | `api/health.py`, `api/scenes.py` | Translate requests to store calls; no logic |
-| Contract | `schemas.py` | Pydantic models of every response, including the scene manifest |
+| HTTP routes | `api/health.py`, `api/scenes.py`, `api/sounds.py` | Translate requests to store and sonifier calls; no logic |
+| Contract | `schemas.py` | Pydantic models of every response, including the scene manifest and the sound reading |
 | Scene machinery | `services/scenes.py` | `SceneSource` protocol, `SceneStore`, and the only functions that build manifests |
 | Scene sources | `services/aerosol_scene.py`, `pm25_scene.py`, `fire_scene.py`, `precipitation_scene.py` | One class per scene: `check()` and `build()` |
 | NASA clients | `services/geosfp.py`, `services/svs.py`, `services/http.py` | Fetch and parse; injected `get` functions so tests never use the network |
 | Image decoding | `services/colour_scale.py`, `services/exr.py` | Pure numpy/Pillow/OpenEXR functions |
+| Sonification | `services/sonification.py` | Reads a point of a scene and turns it into a reading or a WAV; owns the cap on simultaneous renders |
+| Sound synthesis | `services/sound/*` | Pure numpy: one module per sound plus shared DSP; knows nothing about scenes or HTTP |
 
 **Adding a new scene:** write a class with `scene_id`, `check() -> (version, context)` and `build(version, context) -> Scene` in `services/<name>_scene.py`, building the manifest with `build_manifest`, `encode_species`, `time_axis` and a grid helper (never a hand-made dict); add it to `default_scenes()` in `factory.py`; add a fake source of data and tests; then add the scene to `frontend/js/catalog/scenes.js` and to a layer in `config.js`.
 
@@ -130,14 +137,27 @@ The four scenes, all built at runtime (`factory.default_scenes()`), each with `S
 - `clock` and `spawn` are injectable for tests. `error` holds the last failure for diagnostics and logs; the 503 response sent to clients has a fixed message and does not expose it.
 - Scenes live in process memory: about 4 MB (pm25), 8 MB (aerosol), 4 MB (fires), 17 MB (precipitation), doubled while the previous version is kept. Building peaks at about 105 MB per PM2.5 frame and about 235 MB per fire frame and about 105 MB per precipitation frame (measured), one frame at a time.
 
+### Sounds (`services/sonification.py`, `services/sound/`)
+
+The sounds were ported from the exploration repo (`D:\nasa-sonification\explore\sonifiers`, synthesis only; its loaders, temperature, radar and sonar were left out). The port was checked sample by sample against that code on 15 Nov 2026: identical audio for air and rain, and for fire at equal driver values.
+
+- **The idea:** a direct, fixed translation of the data into sound, not music. Each sound hangs on **one number from 0 to 1** (`intensity`) computed from the value at the point, and every parameter is a formula of it (`mapping()`); `describe()` says in Spanish what is heard and why; `synthesize()` is pure and deterministic (same sample and seed → same audio). Every clip is 15 s (12 s plus a 3 s reverb tail), stereo, 44.1 kHz.
+- **`air`** (`pm25-latest`, species `pm25`): `haze` = log scale from 1 to 350 µg/m³. A low beating drone, a low wind and a hiss of dust; cleaner air is the same sound further back, set to an exact perceived loudness (LUFS). The level word is the position on NASA's scale, the same five words as the point card.
+- **`rain`** (`precipitation-latest`, species `rain`): `wetness` = log(1 + mm/h), full at 20 mm/h (the scene goes to 50). Drops per second, bigger taps, a far wash, wind and, above about 4 mm/h, thunder. Dry still sounds: only the wind.
+- **`fire`** (`fires-latest`, species `frp`): `intensity` = the strongest radiative power in the 3 × 3 cells around the point, divided by 8 MW (NASA's linear scale); the original fire-danger sound with a new driver. Where that is zero there is **no sound** (status `absent`): about 93% of the globe on 8 Nov 2026.
+- **Direction:** the value is also read in 32 directions (12 samples each, 40–300 km for rain, 60–400 km otherwise, never the point's own cell); grains (dust, drops, crackles) arrive more from the side with more of it, east on the right.
+- **Two routes, like the scenes:** `GET /api/sounds/{sound}?lat=&lon=` returns a `SoundReading` without synthesising anything (value, intensity, description, parameters, `audio` path, or status `absent` / `no_data`); `GET /api/sounds/{sound}/{version}.wav?lat=&lon=` renders the clip. The point is snapped to its scene cell and the scene version is in the path, so the audio is immutable and the browser caches it. A version older than the current and previous scene gives 404.
+- **Cost (measured):** 0.5–2 s of CPU and 125–170 MB of memory per render, and a 2.65 MB WAV. `Sonifier` renders at most 2 at once (a semaphore); beyond that the route answers 503 with `Retry-After: 2` and the frontend waits and retries up to 3 times. Nothing is cached on the server.
+- **Adding a sound:** a module in `services/sound/` with a frozen parameters dataclass (with `intensity`), `mapping`, `describe` and `synthesize`; an entry in `SOUNDS`; `sound: '<id>'` on a layer in `config.js`; tests of its properties (rendering is slow: use module fixtures).
+
 ### Frontend: layers, animation, click and sound
 
 - **Layers.** Each layer of `config.js` with `kind: 'scene'` has a collapsible "Tipo" selector (a full-width row under the layer; closed by default, shows the current species) with one radio button per species across its scenes; arrow keys move the selection. Aerosoles: "EIC PM 2.5" (first, default, from `pm25-latest`) and the five GEOS-FP species (from `aerosol-latest`). Incendios: "EIC Incendios". Precipitación: "Lluvia" (default) and "Nieve", one at a time. A scene is fetched the first time one of its species is selected with the layer on (`globe-map.js loadScenesOnDemand`, retry every 5 s on any error), and each scene gets its own map layer (`<layer>-<sceneId>`). The panel note shows the source and date of what is on screen (`sceneInfo` in the store).
 - **Drawing.** `series-layer.js` paints each step once into its own canvas, re-projected to Web Mercator: with the manifest's ramp when there is one (log: transparent in clean air; linear: any value above zero shows; a species with `fade: 'sparse'` in the catalog, as rain and snow, shows from the low end of its log scale), else with a single colour per species whose opacity grows with the value. It cross-fades the two neighbouring steps with canvas compositing (`lighter` with weights).
 - **Animation.** `scene-animation.js` loops 0 → 1 in 9 s, holds 2.2 s on the newest step and restarts (20 fps). `globe-map.js` runs it while `state.scenePlaying` is true and a scene layer is visible, calling `series.setProgress(p)` directly; the store only gets `sceneProgress` in 24 coarse ticks for the panel label ("Últimas 21 h · 8 h antes", or in days for fires). Pausing returns to the newest step. `scenePlaying` starts false when the user prefers reduced motion.
-- **Click → reading.** `explorer.js initPointProbe`: ignores clicks off the globe (`globe.isOnGlobe`), wraps and rounds the coordinates, builds a reading (`data/point-reading.js`) and fills it from `getScene('pm25-latest')` and `getScene('aerosol-latest')` independently, with no server round trip per click. The card (`ui/point-card.js`, `textContent` only) sits in a fixed panel in the bottom-right corner (`.ej-point-dock`) and the point gets a `maplibregl.Marker`. Card and sound always describe the newest step; the trend covers all the steps of the scene (21 hours).
-- **Roles are fixed:** PM2.5 from the EIC visualization says **how much** (µg/m³, plus a level word from its position on NASA's log scale: relative to that scale, not an air-quality index); GEOS-FP says **what it is made of** (share of each species' optical depth at the newest step) and **where it is going** (change of the 5-species total; beyond ±10% is "en aumento"/"en descenso"). Never drive the same visual or sound property from two sources.
-- **Sound** (`ui/player.js` + `audio/audio-engine.js`): the player follows `state.reading`. PM2.5 position on NASA's scale → pitch (110 Hz × 2^(3v)) and level; species shares → timbre (gain of one voice per species: sea salt = pure sine, sulfate = bright, brown carbon = odd harmonics, black carbon = rough, dust = beating pair); trend → a three-note cue. Without live data a neutral voice plays. Until the first click, or where the EIC image has no data, the simulated demo signal plays and the top chip reads "Modo demostración" instead of "Datos de la NASA".
+- **Click → reading.** `explorer.js initPointProbe`: ignores clicks off the globe (`globe.isOnGlobe`), wraps and rounds the coordinates, builds a reading (`data/point-reading.js`) and fills it from `getScene('pm25-latest')` and `getScene('aerosol-latest')` independently, in the browser. The card (`ui/point-card.js`, `textContent` only) sits in a fixed panel in the bottom-right corner (`.ej-point-dock`) and the point gets a `maplibregl.Marker`. The card always shows PM2.5, composition and trend, whatever layer is on; it describes the newest step.
+- **Roles in the card:** PM2.5 from the EIC visualization says **how much** (µg/m³, plus a level word from its position on NASA's log scale: relative to that scale, not an air-quality index); GEOS-FP says **what it is made of** and **where it is going** (change of the 5-species total; beyond ±10% is "en aumento"/"en descenso"). The sound no longer uses GEOS-FP.
+- **Sound** (`ui/player.js` + `audio/clip-player.js` + `data/sound-api.js`): the active layer decides what is heard (`sound` in `config.js`: Aerosoles → `air`, Precipitación → `rain`, Incendios → `fire`); with no layer on, nothing plays and nothing is requested. A click on the globe (a new `state.reading.point`) asks the API for the reading (text and numbers, shown at once and announced in a live region) and then for the clip, which starts by itself; the button stops or replays it without asking again. Changing the layer stops the sound; the button then plays the same point with the new layer. The top chip reads "Sonido: <capa>" or "Sin capa activa: en silencio". There is no demo signal any more.
 
 ## Quality gates (backend)
 
@@ -148,7 +168,7 @@ cd backend
 uv run ruff check .            # E, F, I, UP, B, SIM + D (docstrings, google convention) + ANN (type annotations)
 uv run ruff format --check .
 uv run mypy                    # strict, on app/
-uv run pytest --cov            # coverage of app/ with branches; fails under 95% (it is at 100%)
+uv run pytest --cov            # coverage of app/ with branches; fails under 95% (it is at 100%); about 12 s, most of it rendering sounds
 ```
 
 - Docstrings are required on every public module, class, function and method (`D107` is ignored: `__init__` arguments are documented in its own docstring when they need explaining). Tests are exempt from `D` and `ANN`: the test name says what is checked.
@@ -221,6 +241,9 @@ When waiting for a service, use `curl -sf`: without `-f`, a 502 counts as succes
 ## Known issues and limits
 
 - **One instance only.** Scenes are per process, so replicas would not agree during an update and a serverless host would rebuild from NASA on every cold start. Lifting this needs the built scenes stored outside the process (disk or object storage).
+- **Every click on the globe with a layer on costs server CPU** (see "Sounds"): the routes are public and unauthenticated, protected only by the cap of 2 simultaneous renders. If that does not hold up, the agreed fallback is a pre-rendered bank of clips per intensity level, picked by the frontend.
+- **The sounds have been checked by measurement, not by ear:** tests and the browser check cover level, density, panning, format and that the clip plays; how it sounds is for a person to judge.
+- The rain sound saturates at 20 mm/h and there is no sound for snow; the EPA/WHO wording of the exploration code was dropped to keep the project's rule that PM2.5 levels are relative to NASA's scale.
 - **NASA is a runtime dependency.** If its servers are down when the backend starts, the affected layer stays empty until they recover: there is no on-disk copy of the last scene.
 - **Data age:** GEOS-FP "assim" runs about 12 hours behind real time; the PM2.5 loop only changes once a day; the newest usable fire frame is several days old; precipitation is about 5 hours old.
 - **The PM2.5 scale ends (0.4 and 409.6 µg/m³) and the fire colour bar are constants.** If NASA rescales either legend, values would be wrong without any error. Nothing checks them against the page. The same holds for the precipitation class edges (the colours are read from the page; the numbers on the marks are not).
@@ -238,11 +261,11 @@ Agreed to leave for later (from the independent review of 15 Nov 2026); do not s
 
 - **Keyboard and screen-reader point selection.** A point can only be picked with the mouse. Also: two live regions announce each click.
 - **No frontend tests, linter or formatter.** Mixed quote styles and indentation between files. First candidates for unit tests: `data/scene-data.js`, `data/point-reading.js`, the pure parts of `map/series-layer.js`, `data/scene-cache.js`, `state/store.js`.
-- **Large closure functions** (114–187 lines) in `series-layer.js`, `globe-map.js`, `dotted-globe.js`, `layer-panel.js`, `audio-engine.js`, `waveform.js`, `player.js`; `globe-map.js` also owns scene loading, retries (forever, every 5 s) and the animation wiring.
-- **Duplicated helpers:** date, percent and trend formatting in `layer-panel.js`, `point-card.js` and `player.js`; the land mask in `map/land-dots.js` and `effects/globe/land-mask.js`. Species ids are written in `aerosol_scene.py`, `catalog/scenes.js` and `audio-engine.js` with nothing checking they agree.
-- **Not yet removed:** `sampleAt()` (kept for a spatial sweep in sound), `title`/`reference` in the scene catalog (not shown), unused CSS selectors in `explorer.css`, `components.css`, `base.css` and `explorer-shell.css`, and the "PENDIENTE" note in `explorer.html`.
+- **Large closure functions** (114–187 lines) in `series-layer.js`, `globe-map.js`, `dotted-globe.js`, `layer-panel.js`, `waveform.js`, `player.js`; `globe-map.js` also owns scene loading, retries (forever, every 5 s) and the animation wiring.
+- **Duplicated helpers:** date, percent and trend formatting in `layer-panel.js`, `point-card.js` and `player.js`; the land mask in `map/land-dots.js` and `effects/globe/land-mask.js`. Species ids are written in `aerosol_scene.py` and `catalog/scenes.js`, and sound ids in `sonification.py` and `config.js`, with nothing checking they agree.
+- **Not yet removed:** `sampleAt()` (not used), `title`/`reference` in the scene catalog (not shown), unused CSS selectors in `explorer.css`, `components.css`, `base.css` and `explorer-shell.css`, and the "PENDIENTE" note in `explorer.html`.
 - MapLibre is a static import from a CDN: if it is unreachable the page fails without a message. Scene fetches have no timeout and the scene cache is never invalidated, so a tab left open never shows newer data.
-- Fires and precipitation are on the globe only: not in the point card or the sound. Sound has no spatial sweep and does not start by itself on click.
+- Fires and precipitation are not in the point card. The sound follows the layer, not the species: with "Nieve" or a GEOS-FP species selected, the click still plays rain or PM2.5. The player's description can grow tall enough to touch the point card on short screens.
 
 ## Verified NASA facts (probed 14-15 Nov 2026)
 
@@ -257,4 +280,4 @@ More detail and evidence live in the sibling exploration repo `D:\nasa-sonificat
 
 ## Possible next steps
 
-Not agreed, only candidates: fires and precipitation in the point card and the sound; live fire numbers near the click (needs a FIRMS key); storing built scenes outside the process; a guard on the legend constants; the deferred frontend work above. The earlier idea of migrating Gabriel's backend from `D:\NASA-Proyecto` (NASA POWER, EONET) was dropped in favour of the scene design.
+Not agreed, only candidates: fires and precipitation in the point card; a pre-rendered sound bank instead of per-click rendering; a sound for snow and for temperature; live fire numbers near the click (needs a FIRMS key); storing built scenes outside the process; a guard on the legend constants; the deferred frontend work above. The earlier idea of migrating Gabriel's backend from `D:\NASA-Proyecto` (NASA POWER, EONET) was dropped in favour of the scene design.

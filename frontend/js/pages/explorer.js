@@ -6,6 +6,7 @@ import { initPlayer } from '../ui/player.js';
 import { mountIcons } from '../ui/icons.js';
 import { createStarfield } from '../effects/starfield.js';
 import { store, setReading } from '../state/app-store.js';
+import { activeLayer } from '../core/layers.js';
 import { getScene } from '../data/scene-cache.js';
 import {
   PM25_SCENE,
@@ -37,7 +38,7 @@ const status = createGlobeStatus({
   textElement: document.getElementById('globe-status-text'),
 });
 
-// Paneles plegables: capas (izquierda) y señal (derecha)
+// Paneles plegables: capas (izquierda) y sonido (derecha)
 function setPanelOpen(toggle, open) {
   const name = toggle.dataset.panelName;
   toggle.setAttribute('aria-expanded', String(open));
@@ -58,8 +59,8 @@ for (const toggle of panelToggles) {
 }
 
 // Clic en el globo: lee ese punto en las escenas (ya descargadas o pidiéndolas ahora) y lo
-// muestra en una ficha fija. No hay viaje al servidor por clic. La lectura se guarda en el
-// store: el reproductor la convierte en sonido. Solo cuenta el último clic.
+// muestra en una ficha fija. La lectura se guarda en el store; el reproductor ve el punto
+// nuevo y pide a la API el sonido de la capa activa. Solo cuenta el último clic.
 const COORD_DECIMALS = 5; // ~1 m: más precisión no aporta nada
 const round = (value) => Number(value.toFixed(COORD_DECIMALS));
 
@@ -122,12 +123,15 @@ function initPointProbe(globe) {
   });
 }
 
-// El rótulo superior dice si lo que suena es la demostración o datos de la NASA
+// El rótulo superior dice qué capa se oye al hacer clic (o que no suena nada)
 const modeChip = document.getElementById('mode-chip-text');
-store.subscribe((state) => {
-  const text = state.reading?.pm25.status === 'ok' ? 'Datos de la NASA' : 'Modo demostración';
+function showSoundMode(state) {
+  const layer = activeLayer(state);
+  const text = layer ? `Sonido: ${layer.label}` : 'Sin capa activa: en silencio';
   if (modeChip.textContent !== text) modeChip.textContent = text;
-});
+}
+store.subscribe(showSoundMode);
+showSoundMode(store.getState());
 
 createGlobeMap({ container: 'map' })
   .then((globe) => {

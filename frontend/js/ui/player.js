@@ -1,134 +1,149 @@
-import { createAudioEngine } from '../audio/audio-engine.js';
-import { createSimulatedSource } from '../audio/simulated-source.js';
+import { createClipPlayer } from '../audio/clip-player.js';
+import { activeLayer } from '../core/layers.js';
+import { fetchSoundClip, fetchSoundReading } from '../data/sound-api.js';
 import { store } from '../state/app-store.js';
-import { formatPm25 } from './point-card.js';
 import { createWaveform } from './waveform.js';
 
-const fmt = new Intl.NumberFormat('es-ES', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+const number = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 });
 const percent = new Intl.NumberFormat('es-ES', { style: 'percent', maximumFractionDigits: 0 });
 
-const band = (v) => (v < 0.33 ? 'baja' : v < 0.66 ? 'media' : 'alta');
-const TREND_WORDS = { up: 'en aumento', down: 'en descenso', flat: 'estable' };
+const TEXT = {
+  noLayer: 'Sin capa activa: no suena nada. Activa una capa de datos.',
+  noPoint: (label) => `Haz clic en el globo para oír ${label.toLowerCase()} en ese punto.`,
+  samePoint: (label) => `Pulsa reproducir para oír ${label.toLowerCase()} en el punto seleccionado.`,
+  reading: 'Leyendo el punto…',
+  rendering: 'Generando el sonido…',
+  playing: 'Sonando',
+  ready: 'Sonido listo: pulsa reproducir para oírlo otra vez.',
+  silent: 'En este punto no suena nada.',
+  notReady: 'Los datos de la NASA aún se están preparando. Inténtalo en unos segundos.',
+  failed: 'No se pudo obtener el sonido. Inténtalo de nuevo.',
+};
 
-const DEMO_TEXT = { title: 'Señal de demostración', sub: 'Índice simulado: haz clic en el globo' };
-const POINT_TEXT = { title: 'Sonido del punto', sub: 'PM2.5 del EIC + composición GEOS-FP' };
-
-// Lo que suena describe el punto seleccionado en el globo (state.reading). Hasta el
-// primer clic, o si ese punto no tiene dato de PM2.5, suena la señal de demostración.
-export function initPlayer(root, { demo = createSimulatedSource() } = {}) {
-  const engine = createAudioEngine();
+// El sonido del punto seleccionado. Qué suena lo decide la capa activa (solo puede haber
+// una): sin capa, nada. Un clic en el globo pide el sonido a la API y lo reproduce; el
+// botón lo para o lo repite.
+export function initPlayer(root) {
+  const engine = createClipPlayer();
   const playBtn = root.querySelector('[data-player-play]');
   const volume = root.querySelector('[data-player-volume]');
-  const title = root.querySelector('[data-player-title]');
   const sub = root.querySelector('[data-player-sub]');
+  const readLayer = root.querySelector('[data-readout-layer]');
   const readValue = root.querySelector('[data-readout-value]');
-  const readPitch = root.querySelector('[data-readout-pitch]');
   const readLevel = root.querySelector('[data-readout-level]');
-  const live = root.querySelector('[data-player-live]');
+  const description = root.querySelector('[data-player-description]');
   const wave = createWaveform(root.querySelector('[data-player-wave]'), engine);
 
-  let timer = 0;
-  let lastBand = '';
-  let described = null; // última lectura ya anunciada (PM2.5)
-  let cued = null; // última lectura cuyo aviso de tendencia ya sonó
+  let layer = activeLayer(store.getState());
+  let point = null; // último punto en el que se hizo clic
+  let clip = null; // sonido ya descargado de ese punto con esa capa: { buffer }
+  let pending = null; // AbortController de la petición en curso
 
-  const pointReading = () => {
-    const { reading } = store.getState();
-    return reading?.pm25.status === 'ok' ? reading : null;
-  };
-
-  function describe(reading) {
-    const parts = [
-      `Punto seleccionado: PM2.5 ${formatPm25(reading.pm25.value)} microgramos por metro cúbico, nivel ${reading.pm25.level}.`,
-    ];
-    if (reading.live.status === 'ok') {
-      const [main] = reading.live.species;
-      parts.push(
-        `Predomina ${main.label}, ${percent.format(main.share)}.`,
-        `Aerosoles ${TREND_WORDS[reading.live.trend.direction]}.`
-      );
-    }
-    return parts.join(' ');
-  }
-
-  function updateFromPoint(reading) {
-    const { pm25, live: mix } = reading;
-    engine.setValue(pm25.position);
-    readValue.textContent = `${formatPm25(pm25.value)} µg/m³`;
-    readLevel.textContent = pm25.level;
-
-    if (mix.status === 'ok') {
-      engine.setTimbre(Object.fromEntries(mix.species.map((item) => [item.id, item.share])));
-      if (cued !== reading) {
-        cued = reading;
-        engine.playCue(mix.trend.direction);
-        live.textContent = describe(reading);
-      }
-    } else {
-      engine.setTimbre(null);
-    }
-    if (described !== reading.point) {
-      described = reading.point;
-      live.textContent = describe(reading);
-    }
-  }
-
-  function updateFromDemo() {
-    const v = demo.getValue();
-    engine.setValue(v);
-    engine.setTimbre(null);
-    readValue.textContent = fmt.format(v);
-    readLevel.textContent = band(v);
-    if (band(v) !== lastBand) {
-      lastBand = band(v);
-      live.textContent = `Señal simulada, intensidad ${lastBand}.`;
-    }
-  }
-
-  function update() {
-    const reading = pointReading();
-    const text = reading ? POINT_TEXT : DEMO_TEXT;
-    if (title && title.textContent !== text.title) title.textContent = text.title;
-    if (sub && sub.textContent !== text.sub) sub.textContent = text.sub;
-
-    if (reading) updateFromPoint(reading);
-    else updateFromDemo();
-    readPitch.textContent = `${Math.round(engine.getFrequency())} Hz`;
-  }
-
-  async function play() {
-    try {
-      engine.setVolume(Number(volume.value));
-      cued = null; // al empezar a sonar, el aviso de tendencia del punto actual se oye
-      update();
-      await engine.start();
-      timer = setInterval(update, 100);
-      playBtn.setAttribute('aria-pressed', 'true');
-      playBtn.setAttribute('aria-label', 'Pausar');
-      wave.wake();
-    } catch (error) {
-      console.error(error);
-      live.textContent = 'No se pudo iniciar el audio en este navegador.';
-    }
-  }
-
-  function pause() {
-    clearInterval(timer);
-    engine.stop();
-    playBtn.setAttribute('aria-pressed', 'false');
-    playBtn.setAttribute('aria-label', 'Reproducir');
+  function setPlaying(playing) {
+    playBtn.setAttribute('aria-pressed', String(playing));
+    playBtn.setAttribute('aria-label', playing ? 'Parar' : 'Reproducir');
     wave.wake();
   }
 
-  playBtn.addEventListener('click', () => (engine.isPlaying() ? pause() : play()));
-  volume.addEventListener('input', () => engine.setVolume(Number(volume.value)));
-  window.addEventListener('pagehide', pause);
+  function showReading(reading) {
+    const audible = reading?.status === 'ok';
+    readValue.textContent =
+      reading?.value === undefined ? '—' : `${number.format(reading.value)} ${reading.unit}`;
+    readLevel.textContent = audible ? percent.format(reading.intensity) : '—';
+    description.textContent = reading?.description ?? '';
+  }
 
-  // Con el sonido parado, los indicadores también siguen al punto seleccionado
-  store.subscribe(() => {
-    if (!engine.isPlaying()) update();
+  // Texto de reposo: qué hace falta para que suene algo
+  const hint = () => {
+    if (!layer) return TEXT.noLayer;
+    return point ? TEXT.samePoint(layer.label) : TEXT.noPoint(layer.label);
+  };
+
+  function idle() {
+    readLayer.textContent = layer?.label ?? '—';
+    sub.textContent = hint();
+    playBtn.disabled = !layer || !point;
+    showReading(null);
+  }
+
+  function stop() {
+    pending?.abort();
+    pending = null;
+    engine.stop();
+    setPlaying(false);
+  }
+
+  function play() {
+    engine.play(clip.buffer, () => {
+      setPlaying(false);
+      sub.textContent = TEXT.ready;
+    });
+    sub.textContent = TEXT.playing;
+    setPlaying(true);
+  }
+
+  // Pide el sonido del punto con la capa activa y lo reproduce en cuanto llega
+  async function load() {
+    stop();
+    clip = null;
+    const controller = new AbortController();
+    pending = controller;
+    const current = () => pending === controller;
+
+    engine.unlock(); // dentro del clic: después el navegador ya deja sonar
+    engine.setVolume(Number(volume.value));
+    playBtn.disabled = false;
+    sub.textContent = TEXT.reading;
+    showReading(null);
+    try {
+      const reading = await fetchSoundReading(layer.sound, point, controller.signal);
+      if (!current()) return;
+      showReading(reading);
+      if (reading.status !== 'ok') {
+        sub.textContent = TEXT.silent;
+        return;
+      }
+      sub.textContent = TEXT.rendering;
+      const buffer = await engine.decode(await fetchSoundClip(reading.audio, controller.signal));
+      if (!current()) return;
+      clip = { buffer };
+      play();
+    } catch (error) {
+      if (!current()) return; // lo sustituyó otro clic o un cambio de capa
+      console.warn('[sonido] Sin sonido para el punto:', error);
+      sub.textContent = error.status === 503 ? TEXT.notReady : TEXT.failed;
+    } finally {
+      if (current()) pending = null;
+    }
+  }
+
+  playBtn.addEventListener('click', () => {
+    if (engine.isPlaying() || pending) {
+      stop();
+      sub.textContent = clip ? TEXT.ready : hint();
+    } else if (clip) play();
+    else load();
   });
+  volume.addEventListener('input', () => engine.setVolume(Number(volume.value)));
+  window.addEventListener('pagehide', stop);
+
+  store.subscribe((state) => {
+    const nextLayer = activeLayer(state);
+    const nextPoint = state.reading?.point ?? null;
+
+    if (nextLayer !== layer) {
+      // Cambió la capa activa: lo que sonaba ya no corresponde a lo que se ve
+      layer = nextLayer;
+      stop();
+      clip = null;
+      idle();
+    }
+    if (nextPoint !== point) {
+      point = nextPoint;
+      if (layer) load();
+      else idle();
+    }
+  });
+
+  idle();
 }

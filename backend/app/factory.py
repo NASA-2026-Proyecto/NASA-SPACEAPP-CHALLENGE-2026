@@ -19,6 +19,7 @@ from app.services.geosfp import GeosFpClient
 from app.services.pm25_scene import Pm25Source
 from app.services.precipitation_scene import PrecipitationSource
 from app.services.scenes import SceneStore, SceneStores
+from app.services.sonification import Sonifier
 from app.services.svs import SvsClient
 
 
@@ -73,5 +74,6 @@ def create_app(settings: Settings | None = None, scenes: SceneStores | None = No
         )
 
     app.state.scenes = stores
+    app.state.sonifier = Sonifier(stores)
     app.include_router(api_router)
     return app

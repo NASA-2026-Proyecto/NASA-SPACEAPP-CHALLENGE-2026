@@ -1,5 +1,5 @@
 const POINTS = 160;
-const CYCLES = 3;
+const WINDOW = 1024; // muestras que se dibujan: unos 23 ms de sonido
 const SMOOTHING = 0.35;
 
 export function createWaveform(canvas, engine) {
@@ -37,10 +37,7 @@ export function createWaveform(canvas, engine) {
     if (!buffer) buffer = new Float32Array(analyser.fftSize);
     analyser.getFloatTimeDomainData(buffer);
 
-    const span = Math.min(
-      buffer.length / 2,
-      Math.max(128, Math.round((CYCLES * engine.getSampleRate()) / engine.getFrequency()))
-    );
+    const span = Math.min(buffer.length / 2, WINDOW);
 
     let start = 0;
     for (let i = 1; i < buffer.length - span; i++) {

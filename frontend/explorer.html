@@ -40,7 +40,7 @@
 
     <div class="ej-chip" role="status">
       <span class="ej-chip__icon" data-icon="signal" aria-hidden="true"></span>
-      <span id="mode-chip-text">Modo demostración</span>
+      <span id="mode-chip-text">Sin capa activa: en silencio</span>
     </div>
 
     <div class="ej-navbar__actions">
@@ -84,29 +84,29 @@
     </div>
   </main>
 
-  <!-- DERECHA · Señal de demostración (la controla js/ui/player.js mediante los data-*) -->
+  <!-- DERECHA · Sonido del punto seleccionado (lo controla js/ui/player.js mediante los data-*) -->
   <section class="ej-panel ej-panel--signal" id="player" aria-labelledby="signal-title">
     <div class="ej-panel__header">
       <span class="ej-panel__badge ej-panel__badge--violet" data-icon="signal" aria-hidden="true"></span>
       <div class="ej-panel__heading">
-        <h2 id="signal-title" class="ej-panel__title" data-player-title>Señal de demostración</h2>
-        <p class="ej-player__sub" data-player-sub>Índice simulado: haz clic en el globo</p>
+        <h2 id="signal-title" class="ej-panel__title">Sonido del punto</h2>
+        <p class="ej-player__sub" data-player-sub>Sin capa activa: no suena nada. Activa una capa de datos.</p>
       </div>
       <button class="ej-icon-btn" type="button" aria-expanded="true" aria-controls="signal-body" data-panel-toggle
-        data-panel-name="señal" aria-label="Plegar panel de señal">
+        data-panel-name="sonido" aria-label="Plegar panel de sonido">
         <span aria-hidden="true">–</span>
       </button>
     </div>
 
     <div id="signal-body" class="ej-panel__body">
       <dl class="ej-player__readout">
+        <div class="ej-stat ej-stat--tone">
+          <dt><span class="ej-stat__icon" data-icon="tone" aria-hidden="true"></span>Capa</dt>
+          <dd data-readout-layer>—</dd>
+        </div>
         <div class="ej-stat ej-stat--value">
           <dt><span class="ej-stat__icon" data-icon="gauge" aria-hidden="true"></span>Valor</dt>
           <dd data-readout-value>—</dd>
-        </div>
-        <div class="ej-stat ej-stat--tone">
-          <dt><span class="ej-stat__icon" data-icon="tone" aria-hidden="true"></span>Tono</dt>
-          <dd data-readout-pitch>—</dd>
         </div>
         <div class="ej-stat ej-stat--level">
           <dt><span class="ej-stat__icon" data-icon="level" aria-hidden="true"></span>Intensidad</dt>
@@ -115,10 +115,11 @@
       </dl>
 
       <canvas class="ej-wave" data-player-wave role="img"
-        aria-label="Forma de onda de la señal sonora en tiempo real"></canvas>
+        aria-label="Forma de onda del sonido en tiempo real"></canvas>
 
       <div class="ej-player__main">
-        <button class="ej-play" type="button" data-player-play aria-pressed="false" aria-label="Reproducir">
+        <button class="ej-play" type="button" data-player-play aria-pressed="false" aria-label="Reproducir"
+          disabled>
           <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M8 5v14l11-7z" />
           </svg>
@@ -135,8 +136,7 @@
         </label>
       </div>
 
-      <p class="ej-player__legend">Mayor valor: tono más agudo y mayor intensidad.</p>
-      <p class="visually-hidden" aria-live="polite" data-player-live></p>
+      <p class="ej-player__description" aria-live="polite" data-player-description></p>
     </div>
   </section>
 

@@ -5,6 +5,8 @@
 //   icon                  -> nombre de js/ui/icons.js
 //   ramp                  -> colores de la capa, de "poco" a "mucho" (iconos, deslizador)
 //   defaultOpacity        -> opacidad inicial (0-1)
+//   sound                 -> sonido de la API (/api/sounds/<sound>) que se oye al hacer clic
+//                            en el globo con la capa activa
 //   kind: 'scene' + scenes -> la capa dibuja escenas (js/catalog/scenes.js). Cada botón de
 //                            especie pertenece a una escena; el primero es el de por defecto.
 //                            SIN escenas la capa aparece como "Pendiente".
@@ -32,6 +34,7 @@ export const LAYERS = [
     badge: 'NASA',
     kind: 'scene',
     scenes: FIRE_SCENES,
+    sound: 'fire',
     species: speciesOf(FIRE_SCENES),
   },
   {
@@ -43,6 +46,7 @@ export const LAYERS = [
     badge: 'NASA',
     kind: 'scene',
     scenes: RAIN_SCENES,
+    sound: 'rain',
     species: speciesOf(RAIN_SCENES),
   },
   {
@@ -54,6 +58,7 @@ export const LAYERS = [
     badge: 'NASA',
     kind: 'scene',
     scenes: AEROSOL_SCENES,
+    sound: 'air',
     species: speciesOf(AEROSOL_SCENES),
   },
 ];
