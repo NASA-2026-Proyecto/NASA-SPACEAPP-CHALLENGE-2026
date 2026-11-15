@@ -10,10 +10,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+import numpy.typing as npt
 
-from app.services.colour_scale import max_pool
+from app.schemas import Scale
+from app.services.colour_scale import FloatArray, max_pool
 from app.services.exr import read_rgb
-from app.services.scenes import Scene, grid_block, species_entry, stamp, version_of
+from app.services.scenes import (
+    Scene,
+    build_manifest,
+    encode_species,
+    time_axis,
+    version_of,
+    whole_globe_grid,
+)
 from app.services.svs import Page, SvsClient
 
 PAGE_ID = 5113
@@ -57,102 +66,129 @@ class FireFrames:
     rendered: datetime  # cuándo generó la NASA los fotogramas (UTC)
 
 
-def frp_from_rgb(rgb: np.ndarray) -> np.ndarray:
+def frp_from_rgb(rgb: npt.NDArray[np.float32]) -> FloatArray:
     """FRP en MW por píxel a partir del color lineal; 0 donde no hay fuego."""
     red = rgb[..., 0]
     power = np.interp(red, RAMP_RED, RAMP_MW).astype(np.float32)
     return np.where(red > FIRE_MIN_RED, power, np.float32(0.0))
 
 
+def frames_with_data(fire_pixels: list[int], steps: int) -> range:
+    """Índices de los fotogramas que se usan: los `steps` últimos antes de la cola vacía.
+
+    Args:
+        fire_pixels: Píxeles con fuego de cada fotograma candidato, del más antiguo al
+            más reciente.
+        steps: Cuántos fotogramas se quieren como máximo.
+
+    Returns:
+        Un rango de índices consecutivos; vacío si ningún fotograma tiene incendios.
+    """
+    # Lo habitual se mide solo entre los fotogramas con algún incendio: si se contaran los
+    # vacíos, con pocos candidatos la mediana sería cero y no se usaría ninguno
+    with_fires = [count for count in fire_pixels if count > 0]
+    if not with_fires:
+        return range(0)
+    usual = float(np.median(with_fires))
+    last = len(fire_pixels)
+    while last > 0 and fire_pixels[last - 1] < TAPER * usual:
+        last -= 1
+    return range(max(0, last - steps), last)
+
+
 class FireSource:
+    """Fuente de la escena de incendios leída de la visualización diaria del EIC."""
+
     scene_id = "fires-latest"
 
     def __init__(self, client: SvsClient, steps: int = 8, factor: int = 8) -> None:
-        """`steps` fotogramas diarios acabando en el último con datos.
+        """Prepara la fuente.
 
-        `factor`: lado del bloque de píxeles que se resume con su máximo. Con 8, los
-        4096 x 2048 píxeles quedan en una malla de 512 x 256 (~0,7°).
+        Args:
+            client: Cliente de SVS.
+            steps: Cuántos fotogramas diarios lleva la escena, acabando en el último con datos.
+            factor: Lado del bloque de píxeles que se resume con su máximo. Con 8, los
+                4096 x 2048 píxeles quedan en una malla de 512 x 256 (~0,7°).
         """
         self._client = client
         self._steps = steps
         self._factor = factor
 
     def check(self) -> tuple[str, FireFrames]:
+        """Versión = fecha de modificación del último fotograma; contexto = los fotogramas.
+
+        La fecha de la página no cambia con cada render diario; la del archivo, sí.
+
+        Raises:
+            LookupError: Si la página no lista fotogramas.
+        """
         page = self._client.page(PAGE_ID)
         urls = self._client.frame_urls(page.find("Frames", "SoaS"))
         if not urls:
             raise LookupError("La página de incendios no lista fotogramas.")
-        # La fecha de la página no cambia con cada render diario; la del archivo, sí
         rendered = self._client.last_modified(urls[-1])
         return version_of(rendered), FireFrames(page, urls, rendered)
 
     def build(self, version: str, frames: FireFrames) -> Scene:
+        """Descarga los últimos fotogramas, descarta los vacíos y monta la escena.
+
+        Raises:
+            ValueError: Si un fotograma no es un mapa 2:1 o ninguno tiene incendios.
+        """
         candidates = frames.urls[-(self._steps + EXTRA_FRAMES) :]
-        grids, counts = [], []
+        grids: list[FloatArray] = []
+        fire_pixels: list[int] = []
         for url in candidates:
             power = frp_from_rgb(read_rgb(self._client.download(url)))
             if power.shape[1] != 2 * power.shape[0]:
                 raise ValueError(f"El fotograma mide {power.shape}: no es un mapa 2:1.")
-            counts.append(int((power > 0).sum()))
+            fire_pixels.append(int((power > 0).sum()))
             grids.append(max_pool(power, self._factor)[::-1])  # de sur a norte
 
-        # Se descartan del final los fotogramas vacíos o a medias
-        usual = float(np.median(counts))
-        last = len(candidates)
-        while last > 0 and counts[last - 1] < TAPER * usual:
-            last -= 1
-        first = max(0, last - self._steps)
-        if last == 0 or usual == 0:
+        used = frames_with_data(fire_pixels, self._steps)
+        if not used:
             raise ValueError("Ningún fotograma reciente tiene incendios.")
+        values = np.stack([grids[index] for index in used])
+        _, n_lat, n_lon = values.shape
 
-        values = np.stack(grids[first:last])
-        n_steps, n_lat, n_lon = values.shape
-        lat_step, lon_step = 180.0 / n_lat, 360.0 / n_lon
         # El último fotograma publicado lleva la fecha del día anterior al render, y hay
         # uno por día (comprobado en los rótulos de la versión con fecha)
-        newest_day = (
-            datetime(frames.rendered.year, frames.rendered.month, frames.rendered.day, tzinfo=UTC) - DAY
-        )
-        days_back = [len(candidates) - 1 - index for index in range(first, last)]
+        rendered = frames.rendered
+        newest_day = datetime(rendered.year, rendered.month, rendered.day, tzinfo=UTC) - DAY
 
-        data, entry = species_entry(
+        data, entry = encode_species(
             version,
             "frp",
             values,
             source_variable="frame colour",
             long_name="fire radiative power of VIIRS active fire detections (5-day moving window)",
             unit="MW",
-            scale={"kind": "linear", "min": 0.0, "max": SCALE_MAX_MW, "ramp": list(RAMP_DISPLAY)},
+            scale=Scale(kind="linear", min=0.0, max=SCALE_MAX_MW, ramp=list(RAMP_DISPLAY)),
             display_scale_max=SCALE_MAX_MW,
             display_scale_method="ends of NASA's colour bar",
         )
-        manifest = {
-            "schema_version": 2,
-            "scene_id": self.scene_id,
-            "version": version,
-            "generated_utc": stamp(datetime.now(UTC)),
-            "layer": "fires",
-            "kind": "grid-series",
-            "provenance": {
+        manifest = build_manifest(
+            scene_id=self.scene_id,
+            version=version,
+            layer="fires",
+            provenance={
                 "provider": "NASA Scientific Visualization Studio",
                 "product": f"EIC daily visualization: {frames.page.title} (VIIRS)",
                 "source_page": frames.page.url,
-                "source_frames": candidates[first:last],
-                "skipped_newest_frames": len(candidates) - last,
+                "source_frames": [candidates[index] for index in used],
+                "skipped_newest_frames": len(candidates) - used.stop,
                 "decoding": "red channel mapped to FRP with the visualization's colour bar; "
                 f"each cell keeps the strongest fire of its {self._factor}x{self._factor} pixel block",
                 "data_kind": "values read back from a published image, not the satellite product",
             },
-            "time": {
-                "steps": n_steps,
-                "step_minutes": 24 * 60,
-                "stamps_utc": [stamp(newest_day - DAY * back) for back in days_back],
-                "note": "One frame per day; each shows a 5-day moving window. Dates are inferred "
+            time=time_axis(
+                [newest_day - DAY * (len(candidates) - 1 - index) for index in used],
+                step_minutes=24 * 60,
+                note="One frame per day; each shows a 5-day moving window. Dates are inferred "
                 "from the render date (newest published frame = the day before). The newest "
                 "frames are skipped while they are still empty.",
-            },
-            # Centros de celda: la imagen cubre de -180 a 180 y de -90 a 90
-            "grid": grid_block(-90.0 + lat_step / 2, lat_step, -180.0 + lon_step / 2, lon_step, values.shape),
-            "species": {"frp": entry},
-        }
+            ),
+            grid=whole_globe_grid(n_lat, n_lon),
+            species={"frp": entry},
+        )
         return Scene(version=version, manifest=manifest, files={"frp.f32": data})

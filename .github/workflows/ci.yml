@@ -1,0 +1,40 @@
+# Comprobaciones del backend en cada pull request y en cada cambio de main:
+# estilo y docstrings (ruff), tipos (mypy) y tests con un mínimo de cobertura (pytest).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (ruff, mypy, pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # El grupo "pipeline" (xarray, pydap...) hace falta para los tests de los scripts sin conexión
+      - name: Instalar dependencias
+        run: uv sync --locked --group pipeline
+
+      - name: Estilo, docstrings y anotaciones (ruff)
+        run: uv run ruff check .
+
+      - name: Formato (ruff)
+        run: uv run ruff format --check .
+
+      - name: Tipos (mypy)
+        run: uv run mypy
+
+      # Ningún test sale a la red. El mínimo de cobertura está en pyproject.toml
+      - name: Tests y cobertura
+        run: uv run pytest --cov

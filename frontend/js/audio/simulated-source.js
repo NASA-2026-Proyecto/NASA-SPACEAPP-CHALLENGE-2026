@@ -2,7 +2,6 @@ export function createSimulatedSource() {
     const t0 = performance.now();
   
     return {
-      label: 'Simulado',
       getValue() {
         const t = (performance.now() - t0) / 1000;
         const v =

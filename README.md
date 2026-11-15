@@ -24,9 +24,9 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 | Aerosol layer, default view: the EIC daily visualization *Particulate Matter (PM) 2.5*, decoded from NASA's image back into values and drawn with NASA's own colour scale | ✅ Working |
 | Aerosol layer, alternative views: near-real-time NASA GEOS-FP model data (five aerosol types, refreshed every 3 hours) | ✅ Working |
 | The aerosol layer is animated: it loops through the last 21 hours of data, with a pause button | ✅ Working |
-| Click on the globe → PM2.5 at that point (EIC visualization), aerosol composition and 6-hour trend (GEOS-FP) | ✅ Working |
+| Click on the globe → PM2.5 at that point (EIC visualization), aerosol composition and trend over the last 21 hours (GEOS-FP) | ✅ Working |
 | Sonification of the clicked point: PM2.5 sets pitch and level, composition sets the timbre, the trend plays a short cue | ✅ Working (a simulated signal plays until a point is selected) |
-| API: `/api/health`, `/api/point`, `/api/scenes` (`pm25-latest`, `aerosol-latest`, `fires-latest`) | ✅ Working |
+| API: `/api/health` and `/api/scenes` (`pm25-latest`, `aerosol-latest`, `fires-latest`), with a typed, documented contract | ✅ Working |
 | Fires layer: the EIC daily visualization *Active Fires As Observed by VIIRS*, decoded into fire radiative power (MW) and animated day by day over the last week | ✅ Working |
 | Fires in the point card and in the sound; precipitation layer | 🔜 Pending |
 
@@ -43,9 +43,9 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
    └───────────────────────────┘  │
                                    ▼
                     ┌──────────────────────────┐
-                    │ backend · FastAPI (uv)    │  stateless, configured by env vars
-                    │   /api/health, /api/point │
-                    │   /api/scenes/…           │──▶ NASA SVS (EIC daily visualization)
+                    │ backend · FastAPI (uv)    │  configured by env vars
+                    │   /api/health             │
+                    │   /api/scenes/…           │──▶ NASA SVS (EIC daily visualizations)
                     │                           │──▶ NASA GEOS-FP (OPeNDAP)
                     └──────────────────────────┘
 ```
@@ -53,8 +53,9 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 - **Data scenes.** The backend fetches NASA data once per update (not once per click), converts it to a compact *scene* (a JSON manifest plus one binary grid per variable) and keeps it in memory. The browser downloads the scene, draws it on the globe and samples it locally for sound, so interaction never waits on NASA.
 
 - **Two images served from one origin.** nginx serves the site and forwards `/api/*` to the API, so the frontend only uses relative URLs (`/api/...`). The same frontend code works locally, in Docker and on any host that can route `/api` to the backend.
-- **Stateless backend** with its configuration in environment variables, ready to scale out or to run as a serverless function.
-- **Self-documenting API:** interactive OpenAPI docs at `/api/docs`.
+- **No database.** The backend holds no user data; its only state is the scenes it has built, kept in the memory of the process and rebuilt from NASA after a restart. Because of that it is meant to run as **one long-lived instance** for now: several replicas would each build their own copy, and a serverless host would rebuild on every cold start. Persisting the built scenes to shared storage is the step that would lift this.
+- **Typed contract and self-documenting API.** The scene manifest is a Pydantic model shared by every data source, published in the interactive OpenAPI docs at `/api/docs`.
+- **Only NASA is contacted.** The backend only requests `https` URLs on the two NASA hosts it uses, retries transient failures, and keeps serving the last good scene when NASA is down.
 
 | Part | Stack |
 |---|---|
@@ -72,15 +73,17 @@ frontend/              Static site (served as the web root)
   nginx/                 nginx config: template + dev/prod settings
   Dockerfile
 backend/               FastAPI app (uv project)
-  app/                   main.py, config.py, schemas.py, api/ (routes), services/ (NASA clients, scenes)
-  geosfp/  tools/        Offline data pipeline: download and build scenes by hand
-  tests/                 pytest
+  app/                   factory.py (builds the app), main.py (entry point), config.py, schemas.py (API contract),
+                         api/ (routes), services/ (NASA clients, colour decoding, scenes)
+  geosfp/  tools/        Offline pipeline: download a past episode and freeze it as a static scene
+  tests/                 pytest (no test touches the network); fixtures/ holds real NASA responses
   pyproject.toml  uv.lock  Dockerfile
 tools/                 One-off scripts (night-lights tile generator)
 compose.yaml           Production-like stack
 compose.dev.yaml       Development overrides (live code, auto-reload)
 .devcontainer/         VS Code devcontainer (backend + frontend)
 .vscode/launch.json    Debug configurations (F5)
+.github/workflows/     CI: lint, type check and tests on every pull request
 ```
 
 ## Development
@@ -138,12 +141,15 @@ uv run --env-file ../.env uvicorn app.main:app --reload    # http://127.0.0.1:80
 
 ```bash
 cd backend
-uv run pytest               # tests
-uv run ruff check .         # lint
+uv run pytest --cov         # tests, with coverage (fails under 95%)
+uv run ruff check .         # lint, including docstrings and type annotations
 uv run ruff format .        # format
+uv run mypy                 # strict type check of app/
 ```
 
-Inside the devcontainer, run the same commands from `/workspace/backend`. The Python test panel in VS Code is preconfigured.
+Inside the devcontainer, run the same commands from `/workspace/backend`. The Python test panel in VS Code is preconfigured. The same four checks run in CI on every pull request ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
+
+No test touches the network: NASA is replaced by small fakes, and `backend/tests/fixtures/` holds real NASA responses so that a change of format on their side shows up as a failing test.
 
 ### Trying the API
 
@@ -151,28 +157,31 @@ Inside the devcontainer, run the same commands from `/workspace/backend`. The Py
 curl http://localhost:8080/api/health
 # {"status":"ok","version":"0.1.0"}
 
-curl "http://localhost:8080/api/point?lat=40.4168&lon=-3.7038"
-# {"ok":true,"lat":40.4168,"lon":-3.7038,"message":"Coordenadas recibidas: lat 40.4168, lon -3.7038"}
-
-curl "http://localhost:8080/api/point?lat=91&lon=0"
-# 422 with detail "Input should be less than or equal to 90"
+curl http://localhost:8080/api/scenes
+# {"scenes":["aerosol-latest","fires-latest","pm25-latest"]}
 
 curl http://localhost:8080/api/scenes/aerosol-latest/manifest.json
 # The latest aerosol scene: time stamps, grid and one file per aerosol type.
-# Returns 503 for the first ~30 seconds after the backend starts, while it fetches from NASA.
-```
-
-### Offline data pipeline (optional)
-
-`backend/geosfp/` and `backend/tools/` hold scripts to download GEOS-FP episodes and build static scenes by hand. Their libraries are in a separate dependency group that the API does not install:
-
-```bash
-cd backend
-uv run --group pipeline python -m tools.download_global_episode
-uv run --group pipeline python -m tools.build_scene --source data/raw/<file>.nc --scene-id <id>
+# Returns 503 with a Retry-After header while the backend is still fetching from NASA
+# (about half a minute after it starts).
 ```
 
 On Windows PowerShell, use `curl.exe` (plain `curl` there is an alias for a different command).
+
+### Offline data pipeline (optional)
+
+The API builds its scenes by itself. `backend/geosfp/` and `backend/tools/` are for a different job: downloading a *past* GEOS-FP episode (for example the smoke of a large wildfire) and freezing it as a static scene, in the same format and with the same code the API uses. Their libraries (xarray, pydap, scipy) are in a separate dependency group that the API image does not install:
+
+```bash
+cd backend
+uv run --group pipeline python -m tools.find_episode --help             # scan a period for the strongest days
+uv run --group pipeline python -m tools.summarize_episode --help        # daily summary of that scan
+uv run --group pipeline python -m tools.download_global_episode --help  # download the episode (NetCDF)
+uv run --group pipeline python -m tools.build_scene --source data/raw/<file>.nc --scene-id <id>
+uv run --group pipeline pytest                                          # also runs the pipeline tests
+```
+
+Downloads and outputs go to `backend/data/`, which is git-ignored.
 
 ### Adding dependencies
 
@@ -210,14 +219,14 @@ Environment variables are read from `.env` (see [.env.example](.env.example)):
 | `PORT` | `8000` | backend image | API port inside the container (some platforms set it automatically) |
 | `BACKEND_URL` | `http://backend:8000` | frontend image | Where nginx forwards `/api/*` |
 
-No API keys are required: NASA GIBS and OpenFreeMap are open services.
+No API keys are required: NASA SVS, GEOS-FP, GIBS and OpenFreeMap are open services. `SCENE_STEPS` accepts 1 to 24.
 
 ### Hosting
 
-The app is currently run locally. Because the frontend only calls relative `/api` URLs and the backend is stateless, it can move to any host that serves the static site and routes `/api/*` to the API:
+The app is currently run locally. Because the frontend only calls relative `/api` URLs, it can move to any host that serves the static site and routes `/api/*` to the API. The API should run as a single long-lived instance (see Architecture):
 
-- **Any container host** (a VM with Docker Compose, Render, Fly.io, Google Cloud Run…): deploy the two images as they are.
-- **Vercel:** serve `frontend/` as a static site. FastAPI runs as a Python function (`backend/app/main.py` exposes `app`, and Vercel reads `pyproject.toml` + `uv.lock`). A rewrite then sends `/api/*` to that function. *Not set up yet.*
+- **Any container host** (a VM with Docker Compose, Render, Fly.io…): deploy the two images as they are, with one API instance. The API image needs about 512 MB of memory or more while it decodes NASA's frames.
+- **Serverless hosts (Vercel, Cloud Run scaled to zero):** the static site fits, but the API in its current form does not fit well: every cold start would rebuild the scenes from NASA. It would first need the built scenes stored outside the process. *Not set up.*
 - **Supabase** cannot host the Python API (its Edge Functions run TypeScript on Deno). It could be added later as a database or for user accounts.
 
 ## Data sources and credits

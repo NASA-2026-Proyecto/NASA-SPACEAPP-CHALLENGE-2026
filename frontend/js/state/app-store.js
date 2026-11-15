@@ -7,7 +7,7 @@ const initialOpacity = Object.fromEntries(LAYERS.map((layer) => [layer.id, layer
 const initialSpecies = Object.fromEntries(
   LAYERS.filter((layer) => layer.species).map((layer) => [
     layer.id,
-    layer.defaultSpecies ?? layer.species[0].id,
+    layer.species[0].id, // la primera especie es la de por defecto
   ])
 );
 
@@ -15,13 +15,12 @@ export const store = createStore({
   layers: initialLayers,
   opacity: initialOpacity,
   nightMode: false,
-  selectedMarker: null,
   species: initialSpecies,
   // Animación de las escenas: recorre sus pasos en bucle. sceneProgress va de 0 (paso
   // más antiguo) a 1 (el más reciente) y aquí solo se actualiza a saltos, para la interfaz.
   scenePlaying: !reducedMotionQuery.matches,
   sceneProgress: 1,
-  sceneInfo: {}, // por id de escena: { stamp } cuando está cargada
+  sceneInfo: {}, // por id de escena: { stamps } (los instantes de sus pasos) cuando está cargada
   reading: null, // lectura del punto seleccionado (js/data/point-reading.js)
 });
 

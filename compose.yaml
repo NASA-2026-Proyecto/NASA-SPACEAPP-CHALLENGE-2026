@@ -18,6 +18,8 @@ services:
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       CORS_ORIGINS: ${CORS_ORIGINS:-[]}
+      SCENE_STEPS: ${SCENE_STEPS:-8}
+      SCENE_WARMUP: ${SCENE_WARMUP:-true}
     restart: unless-stopped
 
   frontend:

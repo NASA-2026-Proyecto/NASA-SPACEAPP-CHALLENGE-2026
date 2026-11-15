@@ -6,8 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.config import Settings
-from app.main import create_app
+from app.factory import create_app
 from app.services.colour_scale import (
     downsample,
     drop_islands,
@@ -18,6 +17,7 @@ from app.services.colour_scale import (
 )
 from app.services.pm25_scene import SCALE_MAX, SCALE_MIN, Pm25Source
 from app.services.scenes import SceneStore
+from tests.conftest import make_settings
 from tests.fake_svs import (
     COAST_COLUMN,
     HEIGHT,
@@ -139,7 +139,7 @@ def test_thin_bright_lines_are_removed_but_wider_features_are_kept():
 def test_scene_matches_the_frontend_format(store):
     store.refresh()
     scene = store.get()
-    manifest = scene.manifest
+    manifest = scene.manifest.model_dump(exclude_none=True)
 
     assert manifest["schema_version"] == 2
     assert manifest["kind"] == "grid-series"
@@ -192,7 +192,7 @@ def test_series_takes_spaced_frames_ending_at_the_newest():
     store = SceneStore(Pm25Source(svs.client(), steps=3, frame_spacing=4, factor=4))
     store.refresh()
     scene = store.get()
-    manifest = scene.manifest
+    manifest = scene.manifest.model_dump(exclude_none=True)
 
     # De 10 fotogramas horarios, uno de cada 4 acabando en el último: 2, 6 y 10
     used = [url.rsplit("/", 1)[1] for url in manifest["provenance"]["source_frames"]]
@@ -213,7 +213,7 @@ def test_series_takes_spaced_frames_ending_at_the_newest():
 def test_series_uses_what_exists_when_there_are_few_frames():
     store = SceneStore(Pm25Source(FakeSvs(frames=3).client(), steps=8, frame_spacing=3))
     store.refresh()
-    manifest = store.get().manifest
+    manifest = store.get().manifest.model_dump(exclude_none=True)
     assert manifest["time"]["steps"] == 1
     assert manifest["provenance"]["source_frames"][0].endswith("00000003.png")
 
@@ -256,7 +256,7 @@ def test_failure_keeps_the_last_good_scene(store, svs):
 
 def test_scene_is_served_by_the_same_endpoints(store):
     store.refresh()
-    api = TestClient(create_app(Settings(cors_origins=[]), scenes={"pm25-latest": store}))
+    api = TestClient(create_app(make_settings(), scenes={"pm25-latest": store}))
 
     assert api.get("/api/scenes").json() == {"scenes": ["pm25-latest"]}
     manifest = api.get("/api/scenes/pm25-latest/manifest.json").json()

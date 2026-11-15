@@ -5,13 +5,13 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import Settings
-from app.main import create_app
+from app.factory import create_app
 from app.services.colour_scale import max_pool
 from app.services.exr import read_rgb
 from app.services.fire_scene import RAMP_DISPLAY, FireSource, frp_from_rgb
 from app.services.scenes import SceneStore
 from app.services.svs import parse_frame_listing
+from tests.conftest import make_settings
 from tests.fake_fires import FIRES, HEIGHT, OCEAN, STRONG_FIRE, WIDTH, FakeFireSvs, frame_exr
 
 
@@ -80,7 +80,7 @@ def test_frame_links_given_as_absolute_paths_are_resolved():
 def test_scene_skips_the_empty_newest_frames(store):
     store.refresh()
     scene = store.get()
-    manifest = scene.manifest
+    manifest = scene.manifest.model_dump(exclude_none=True)
 
     # De 14 fotogramas, los 3 últimos están vacíos y el 11 a medias: se usan del 7 al 10
     used = [url.rsplit("/", 1)[1] for url in manifest["provenance"]["source_frames"]]
@@ -100,7 +100,7 @@ def test_scene_skips_the_empty_newest_frames(store):
 def test_scene_matches_the_frontend_format(store):
     store.refresh()
     scene = store.get()
-    manifest = scene.manifest
+    manifest = scene.manifest.model_dump(exclude_none=True)
 
     assert (manifest["schema_version"], manifest["kind"], manifest["scene_id"]) == (
         2,
@@ -148,7 +148,7 @@ def test_scene_is_rebuilt_only_when_nasa_renders_again(store, svs):
     svs.rendered = datetime(2026, 11, 15, 11, 30, tzinfo=UTC)
     store.refresh()
     assert store.get().version == "20261115T1130Z"
-    assert store.get().manifest["time"]["stamps_utc"][-1] == "2026-11-10T00:00Z"
+    assert store.get().manifest.model_dump(exclude_none=True)["time"]["stamps_utc"][-1] == "2026-11-10T00:00Z"
 
 
 def test_nothing_is_published_when_no_frame_has_fires():
@@ -169,7 +169,7 @@ def test_failure_keeps_the_last_good_scene(store, svs):
 
 def test_scene_is_served_by_the_same_endpoints(store):
     store.refresh()
-    api = TestClient(create_app(Settings(cors_origins=[]), scenes={"fires-latest": store}))
+    api = TestClient(create_app(make_settings(), scenes={"fires-latest": store}))
     manifest = api.get("/api/scenes/fires-latest/manifest.json").json()
     entry = manifest["species"]["frp"]
     file = api.get(f"/api/scenes/fires-latest/{entry['file']}")

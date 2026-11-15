@@ -7,13 +7,16 @@ propia página, para que el front los dibuje (en secuencia) y los sonifique como
 cualquier otra escena.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from io import BytesIO
 
 import numpy as np
 from PIL import Image
 
+from app.schemas import Scale
 from app.services.colour_scale import (
+    FloatArray,
+    Ramp,
     downsample,
     drop_islands,
     fill_small_gaps,
@@ -21,7 +24,14 @@ from app.services.colour_scale import (
     invert_gradient,
     reject_thin_features,
 )
-from app.services.scenes import Scene, grid_block, species_entry, stamp, version_of
+from app.services.scenes import (
+    Scene,
+    build_manifest,
+    encode_species,
+    time_axis,
+    version_of,
+    whole_globe_grid,
+)
 from app.services.svs import Page, SvsClient
 
 PAGE_ID = 5151
@@ -33,13 +43,19 @@ FRAME_MINUTES = 60  # la página publica un fotograma por hora
 
 
 class Pm25Source:
+    """Fuente de la escena de PM2.5 leída de la visualización diaria del EIC."""
+
     scene_id = "pm25-latest"
 
     def __init__(self, client: SvsClient, steps: int = 8, frame_spacing: int = 3, factor: int = 4) -> None:
-        """`steps` fotogramas, uno de cada `frame_spacing` (horas), acabando en el más reciente.
+        """Prepara la fuente.
 
-        `factor`: lado del bloque de píxeles que se promedia. Con 4, los 2048 x 1024
-        píxeles quedan en una malla de 512 x 256 (~0,7°), para que la serie pese poco.
+        Args:
+            client: Cliente de SVS.
+            steps: Cuántos fotogramas lleva la escena, acabando en el más reciente.
+            frame_spacing: Se toma un fotograma de cada tantos (son horarios: 3 = cada 3 h).
+            factor: Lado del bloque de píxeles que se promedia. Con 4, los 2048 x 1024
+                píxeles quedan en una malla de 512 x 256 (~0,7°), para que la serie pese poco.
         """
         self._client = client
         self._steps = steps
@@ -47,11 +63,19 @@ class Pm25Source:
         self._factor = factor
 
     def check(self) -> tuple[str, Page]:
+        """Versión = fecha en que la NASA regeneró la página; contexto = la página."""
         page = self._client.page(PAGE_ID)
         return version_of(page.updated), page
 
-    def _decode(self, frame_bytes: bytes, gradient: np.ndarray) -> tuple[np.ndarray, float]:
-        """Un fotograma -> (µg/m³ en malla de sur a norte, fracción del mapa que se pudo leer)."""
+    def _decode(self, frame_bytes: bytes, gradient: Ramp) -> tuple[FloatArray, float]:
+        """Convierte un fotograma en valores.
+
+        Returns:
+            Los µg/m³ en una malla de sur a norte y la fracción del mapa que se pudo leer.
+
+        Raises:
+            ValueError: Si el fotograma no es un mapa 2:1 o apenas se puede leer.
+        """
         frame = Image.open(BytesIO(frame_bytes))
         if frame.width != 2 * frame.height:
             raise ValueError(f"El fotograma mide {frame.size}: no es un mapa equirrectangular 2:1.")
@@ -64,9 +88,10 @@ class Pm25Source:
 
         # Se promedia en la escala de la barra (logarítmica) y después se pasa a µg/m³
         position = fill_small_gaps(drop_islands(downsample(position, self._factor)))[::-1]
-        return (SCALE_MIN * (SCALE_MAX / SCALE_MIN) ** position).astype("float32"), readable
+        return (SCALE_MIN * (SCALE_MAX / SCALE_MIN) ** position).astype(np.float32), readable
 
     def build(self, version: str, page: Page) -> Scene:
+        """Descarga los fotogramas y la barra de color y monta la escena."""
         # Del más antiguo al más reciente: el último paso es siempre el último fotograma
         urls = self._client.frame_urls(page.find("Frames"))
         frame_urls = urls[:: -self._spacing][: self._steps][::-1]
@@ -80,10 +105,9 @@ class Pm25Source:
         values = np.stack([grid for grid, _ in decoded])
         readable = min(fraction for _, fraction in decoded)
         n_steps, n_lat, n_lon = values.shape
-        lat_step, lon_step = 180.0 / n_lat, 360.0 / n_lon
-        step_minutes = FRAME_MINUTES * self._spacing
+        step = timedelta(minutes=FRAME_MINUTES * self._spacing)
 
-        data, entry = species_entry(
+        data, entry = encode_species(
             version,
             "pm25",
             values,
@@ -91,18 +115,15 @@ class Pm25Source:
             long_name="near-surface PM2.5 concentration",
             unit="ug/m3",
             missing="NaN where the frame shows a logo or caption instead of data",
-            scale={"kind": "log", "min": SCALE_MIN, "max": SCALE_MAX, "ramp": ramp},
+            scale=Scale(kind="log", min=SCALE_MIN, max=SCALE_MAX, ramp=ramp),
             display_scale_max=SCALE_MAX,
             display_scale_method="ends of NASA's colour bar",
         )
-        manifest = {
-            "schema_version": 2,
-            "scene_id": self.scene_id,
-            "version": version,
-            "generated_utc": stamp(datetime.now(UTC)),
-            "layer": "aerosols",
-            "kind": "grid-series",
-            "provenance": {
+        manifest = build_manifest(
+            scene_id=self.scene_id,
+            version=version,
+            layer="aerosols",
+            provenance={
                 "provider": "NASA Scientific Visualization Studio / GMAO",
                 "product": f"EIC daily visualization: {page.title} (GEOS-CF model)",
                 "source_page": page.url,
@@ -114,20 +135,15 @@ class Pm25Source:
                 "readable_fraction": round(readable, 4),
                 "data_kind": "values read back from a published image, not the model output",
             },
-            "time": {
-                "steps": n_steps,
-                "step_minutes": step_minutes,
-                # El intervalo entre pasos es exacto; la hora absoluta, no (ver la nota)
-                "stamps_utc": [
-                    stamp(page.updated - timedelta(minutes=step_minutes * (n_steps - 1 - index)))
-                    for index in range(n_steps)
-                ],
-                "note": "The last stamp is the publication time of the daily render. Each frame's "
+            # El intervalo entre pasos es exacto; la hora absoluta, no (ver la nota)
+            time=time_axis(
+                [page.updated - step * (n_steps - 1 - index) for index in range(n_steps)],
+                step_minutes=FRAME_MINUTES * self._spacing,
+                note="The last stamp is the publication time of the daily render. Each frame's "
                 "own hour is printed on the image (US Eastern time) and is typically several "
                 "hours earlier; the spacing between steps is exact.",
-            },
-            # Centros de celda: la imagen cubre de -180 a 180 y de -90 a 90
-            "grid": grid_block(-90.0 + lat_step / 2, lat_step, -180.0 + lon_step / 2, lon_step, values.shape),
-            "species": {"pm25": entry},
-        }
+            ),
+            grid=whole_globe_grid(n_lat, n_lon),
+            species={"pm25": entry},
+        )
         return Scene(version=version, manifest=manifest, files={"pm25.f32": data})

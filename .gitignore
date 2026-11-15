@@ -30,6 +30,5 @@ desktop.ini
 *.tif
 
 # --- Data pipeline (backend/tools) ----------------------------------------------
-# Intermediate downloads and outputs of the GEOS-FP scripts
-data/raw/
-data/processed/
+# Intermediate downloads and outputs of the GEOS-FP scripts (run from backend/)
+backend/data/

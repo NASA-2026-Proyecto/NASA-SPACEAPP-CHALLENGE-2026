@@ -1,4 +1,4 @@
-// Ficha del punto seleccionado: se muestra en un popup del globo al hacer clic.
+// Ficha del punto seleccionado: se muestra en un panel fijo (esquina inferior derecha).
 // Enseña las dos fuentes por separado, cada una con su fecha:
 //   - PM2.5 de la visualización diaria del EIC (cuánto),
 //   - composición y tendencia del modelo casi en tiempo real (de qué y hacia dónde).

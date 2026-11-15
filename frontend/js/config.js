@@ -1,7 +1,7 @@
 // Catálogo de capas del explorador.
 //
 // Campos:
-//   id, label, colorVar   -> los de siempre
+//   id, label             -> identificador y nombre que se muestra
 //   icon                  -> nombre de js/ui/icons.js
 //   ramp                  -> colores de la capa, de "poco" a "mucho" (iconos, deslizador)
 //   defaultOpacity        -> opacidad inicial (0-1)
@@ -26,7 +26,6 @@ export const LAYERS = [
   {
     id: "fire",
     label: "Incendios",
-    colorVar: "--ej-fire",
     icon: "flame",
     ramp: ["#ff5a4d", "#d62f6f", "#7a3cf0"], // de rojo a morado
     defaultOpacity: 0.9,
@@ -38,7 +37,6 @@ export const LAYERS = [
   {
     id: "rain",
     label: "Precipitación",
-    colorVar: "--ej-rain",
     icon: "drops",
     ramp: ["#8be9ff", "#2f8cff", "#1537b8"], // de celeste a azul intenso
     defaultOpacity: 0.85,
@@ -47,7 +45,6 @@ export const LAYERS = [
   {
     id: 'aerosol',
     label: 'Aerosoles',
-    colorVar: '--ej-aerosol',
     icon: 'haze',
     ramp: ['#ffe29a', '#ff9f43', '#c44569'],
     defaultOpacity: 0.85,

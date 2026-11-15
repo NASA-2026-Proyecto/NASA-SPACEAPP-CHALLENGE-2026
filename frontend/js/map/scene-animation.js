@@ -19,7 +19,6 @@ export function createSceneAnimation(onProgress) {
   }
 
   return {
-    isRunning: () => frame !== 0,
     start() {
       if (frame) return;
       startedAt = performance.now();

@@ -5,6 +5,10 @@
 .pytest_cache/
 .ruff_cache/
 tests/
+# Scripts sin conexión y sus datos: se ejecutan a mano, no forman parte de la API
+geosfp/
+tools/
+data/
 Dockerfile
 .dockerignore
 .env
