@@ -1,7 +1,27 @@
 import { LAYERS } from '../config.js';
-import { isLayerAvailable } from '../core/layers.js';
+import { findScene } from '../catalog/scenes.js';
+import { isLayerAvailable, sceneIdOf } from '../core/layers.js';
 import { store, setLayerVisible, setLayerOpacity, setLayerSpecies } from '../state/app-store.js';
 import { icon } from './icons.js';
+
+const STAMP_FORMAT = new Intl.DateTimeFormat('es-ES', {
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZone: 'UTC',
+});
+
+// Qué se está viendo y de cuándo es: cada fuente tiene su propia fecha.
+function sceneNote(layer, state) {
+  const sceneId = sceneIdOf(layer, state.species[layer.id]);
+  if (!sceneId || !state.layers[layer.id]) return '';
+  const scene = findScene(sceneId);
+  const info = state.sceneInfo[sceneId];
+  if (!info) return `${scene.source} · cargando datos de la NASA…`;
+  const stamp = STAMP_FORMAT.format(new Date(info.stamp.replace('Z', ':00Z')));
+  return `${scene.source} · ${scene.stampLabel} ${stamp} UTC`;
+}
 
 function buildSpeciesGroup(layer, isAvailable) {
   const group = document.createElement('div');
@@ -89,15 +109,19 @@ export function initLayerPanel(listElement) {
     body.append(head, control);
 
     let speciesButtons = null;
+    let note = null;
     if (layer.species) {
       const { group, buttons } = buildSpeciesGroup(layer, isAvailable);
-      body.append(group);
+      note = document.createElement('p');
+      note.className = 'ej-layer__note';
+      note.setAttribute('aria-live', 'polite');
+      body.append(group, note);
       speciesButtons = buttons;
     }
 
     item.append(tile, body, input);
     listElement.append(item);
-    rows.set(layer.id, { item, input, slider, amount, speciesButtons });
+    rows.set(layer.id, { layer, item, input, slider, amount, speciesButtons, note });
   }
 
   const render = (state) => {
@@ -116,6 +140,9 @@ export function initLayerPanel(listElement) {
           button.classList.toggle('is-active', active);
           button.setAttribute('aria-checked', String(active));
         }
+        const text = sceneNote(row.layer, state);
+        if (row.note.textContent !== text) row.note.textContent = text;
+        row.note.hidden = text === '';
       }
     }
   };

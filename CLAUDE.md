@@ -49,11 +49,16 @@ backend/                  uv project (package = false: an app, run from backend/
   app/api/params.py       Shared Lat/Lon Query types (ge/le validation → 422)
   app/api/health.py       GET /api/health → {status, version}
   app/api/point.py        GET /api/point?lat&lon → {ok, lat, lon, message}
-  app/api/scenes.py       GET /api/scenes/aerosol-latest/manifest.json (503 while building) and /{version}/{species}.f32
+  app/api/scenes.py       GET /api/scenes (list), /api/scenes/{scene_id}/manifest.json (503 while building) and /{scene_id}/{version}/{species}.f32
+  app/services/scenes.py  Scene, SceneSource protocol (check() → version, build()), SceneStore (in-memory, background refresh, keeps previous version), manifest helpers
+  app/services/http.py    http_get with retries (urllib)
   app/services/geosfp.py  GEOS-FP OPeNDAP client (urllib + numpy): parse_das, parse_dods, GeosFpClient
-  app/services/scenes.py  build_scene() + SceneStore (in-memory, background refresh, keeps previous version)
+  app/services/aerosol_scene.py  AerosolSource → scene `aerosol-latest` (GEOS-FP, 5 species, last SCENE_STEPS steps)
+  app/services/svs.py     SVS client: page JSON (`/api/{id}`), frame listing, downloads
+  app/services/colour_scale.py   Colour → value: read a colour bar, invert it on an image, reject thin lines, drop islands, downsample, fill small gaps (numpy + Pillow)
+  app/services/pm25_scene.py     Pm25Source → scene `pm25-latest` (EIC daily visualization SVS 5151)
   geosfp/  tools/         Alex's OFFLINE pipeline (xarray + pydap): download episodes, build static scenes. Not imported by app/. Run: `uv run --group pipeline python -m tools.<script>`
-  tests/                  conftest (client fixture with explicit Settings and a fake NASA), fakes.py (FakeGeosFp), test_app.py, test_point.py, test_scenes.py
+  tests/                  conftest (client fixture with explicit Settings and a fake NASA), fakes.py (FakeGeosFp), fake_svs.py (FakeSvs with a synthetic frame and colour bar), test_app.py, test_point.py, test_scenes.py, test_pm25_scene.py
   pyproject.toml  uv.lock  .python-version (3.13)  Dockerfile  .dockerignore
 tools/make-night-tiles.py PEP 723 script: `uv run tools/make-night-tiles.py <earth_nightlights_10K.tif>` → frontend/assets/tiles/nightlights
 compose.yaml              Production-like: backend (prod) + frontend (prod), only 127.0.0.1:${FRONTEND_PORT:-8080} published
@@ -79,6 +84,13 @@ A **scene** is how gridded data reaches the browser, whatever its source. It was
 
 - `manifest.json` (`schema_version: 2`, `kind: "grid-series"`): `time.stamps_utc`, `grid` (`lat_min`, `lat_step`, `lon_min`, `lon_step`, `n_lat`, `n_lon`, `lon_periodic`), and per species `file`, `sha256`, `min`, `max`, `display_scale_max`.
 - One `.f32` per species: float32 little-endian, order `[step][lat][lon]`, south to north, west to east.
+
+There are two scenes, both built by the backend at runtime and wired in `app/main.py default_scenes()`:
+
+- `pm25-latest`, the **field**: the newest frame of the EIC daily visualization PM2.5 (SVS 5151, GEOS-CF). Colours are converted back to µg/m³ with the page's colour bar (log scale 0.4–409.6), 2×2 pixel blocks are averaged to a 1024 × 512 grid, coastlines and borders are removed by shape (bright features under 3 px) and filled, and the logo and date boxes stay NaN. One step; its stamp is NASA's publication time, because the frame's own hour is only printed on the image. The manifest carries `scale: {kind: "log", min, max, ramp}` with NASA's ramp colours, and `series-layer.js` paints it with that ramp (transparent in clean air).
+- `aerosol-latest`, the **probe** source: GEOS-FP species, described next.
+
+In the panel the Aerosoles layer has one button per species across both scenes (`config.js`: `scenes`, each species tagged with its `sceneId`); **PM2.5 is first and the default**. A scene is fetched the first time one of its species is selected with the layer on, and each scene gets its own map layer (`aerosol-<sceneId>`). The panel note shows the source and date of what is on screen (`sceneInfo` in the store).
 
 Flow for the live aerosol scene (`aerosol-latest`):
 
@@ -191,7 +203,7 @@ More detail and evidence live in the sibling exploration repo `D:\nasa-sonificat
 
 Design principle: the **EIC daily visualization is the field** (complete global picture: where, and how much) and the **near-real-time API is the probe** (exact values at a point: composition and trend). Never drive the same visual or sound property from two sources. Both reach the browser as scenes.
 
-- **Phase B, bring in the daily visualization:**
+- **Phase B, bring in the daily visualization: DONE** (see "Data scenes"). What was planned:
   1. Backend: a `pm25-latest` scene that decodes the newest SVS 5151 frame (colour → value, fill gaps under logo/timestamp/coastlines) into the scene format. Reuse `SceneStore`; port the decoding from `D:\nasa-sonification\explore\nasa_sources.py` (`gradient_from_colour_bar`, `invert_gradient`). Adds Pillow.
   2. Globe: draw it through `series-layer.js` with a colour-ramp mode (NASA's ramp, alpha by value). **Decided (option B):** the species buttons stay and gain a first "PM2.5" button (default) that shows the EIC scene; the other five still draw that live GEOS-FP species.
 - **Phase C, live data at a point:**

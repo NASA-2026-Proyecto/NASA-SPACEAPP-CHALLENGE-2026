@@ -21,11 +21,11 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
 | Feature | Status |
 |---|---|
 | 3D globe with NASA Blue Marble basemap and night lights | ✅ Working |
-| Aerosol layer with near-real-time NASA GEOS-FP model data (five aerosol types, refreshed every 3 hours) | ✅ Working |
+| Aerosol layer, default view: the EIC daily visualization *Particulate Matter (PM) 2.5*, decoded from NASA's image back into values and drawn with NASA's own colour scale | ✅ Working |
+| Aerosol layer, alternative views: near-real-time NASA GEOS-FP model data (five aerosol types, refreshed every 3 hours) | ✅ Working |
 | Sonification player (pitch, level, live waveform) | ✅ Working, with a **simulated** signal |
 | Click on the globe → coordinates sent to the API → reply shown on the globe | ✅ Working |
-| API: `/api/health`, `/api/point`, `/api/scenes/aerosol-latest` | ✅ Working |
-| EIC daily visualization (PM2.5) as a second data scene on the globe | 🔜 Next |
+| API: `/api/health`, `/api/point`, `/api/scenes` (`pm25-latest`, `aerosol-latest`) | ✅ Working |
 | Real values at the clicked point, in the popup and in the sound | 🔜 Next |
 | Wildfires and precipitation layers on the globe | 🔜 Pending |
 
@@ -44,7 +44,8 @@ NASA's **Earth Information Center (EIC)** publishes compelling visualizations of
                     ┌──────────────────────────┐
                     │ backend · FastAPI (uv)    │  stateless, configured by env vars
                     │   /api/health, /api/point │
-                    │   /api/scenes/…           │──▶ NASA GEOS-FP (OPeNDAP)
+                    │   /api/scenes/…           │──▶ NASA SVS (EIC daily visualization)
+                    │                           │──▶ NASA GEOS-FP (OPeNDAP)
                     └──────────────────────────┘
 ```
 
@@ -221,8 +222,9 @@ The app is currently run locally. Because the frontend only calls relative `/api
 ## Data sources and credits
 
 - [NASA GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api): Blue Marble shaded relief and bathymetry
+- [NASA Scientific Visualization Studio](https://svs.gsfc.nasa.gov/5151/): the Earth Information Center daily visualization *Particulate Matter (PM) 2.5* (GEOS-CF model)
 - [NASA GMAO GEOS-FP](https://gmao.gsfc.nasa.gov/): aerosol optical depth by type (model analysis, every 3 hours), read through its public OPeNDAP service
 - [NASA Earth Observatory](https://earthobservatory.nasa.gov/): *Earth at Night* (night lights)
 - [OpenFreeMap](https://openfreemap.org/), [OpenMapTiles](https://openmaptiles.org/) and [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors: map labels and boundaries
 - [MapLibre GL JS](https://maplibre.org/), [Three.js](https://threejs.org/), [Bootstrap](https://getbootstrap.com/), [FastAPI](https://fastapi.tiangolo.com/)
-- Planned: the EIC daily visualization [Particulate Matter (PM) 2.5](https://svs.gsfc.nasa.gov/5151/) and VIIRS active fires ([NASA GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api), [FIRMS](https://firms.modaps.eosdis.nasa.gov/))
+- Planned: VIIRS active fires ([NASA GIBS](https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api), [FIRMS](https://firms.modaps.eosdis.nasa.gov/))

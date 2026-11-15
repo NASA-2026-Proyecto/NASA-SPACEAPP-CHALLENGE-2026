@@ -7,8 +7,9 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from app.services.aerosol_scene import SPECIES, AerosolSource
 from app.services.geosfp import parse_dods
-from app.services.scenes import SPECIES, SceneStore
+from app.services.scenes import SceneStore
 from tests.fakes import FakeGeosFp, dods
 
 MANIFEST = "/api/scenes/aerosol-latest/manifest.json"
@@ -21,12 +22,12 @@ def nasa() -> FakeGeosFp:
 
 @pytest.fixture
 def store(nasa) -> SceneStore:
-    return SceneStore(nasa.client(), steps=3)
+    return SceneStore(AerosolSource(nasa.client(), steps=3))
 
 
 @pytest.fixture
 def api(store) -> TestClient:
-    return TestClient(create_app(Settings(cors_origins=[]), scenes=store))
+    return TestClient(create_app(Settings(cors_origins=[]), scenes={"aerosol-latest": store}))
 
 
 # --- Cliente GEOS-FP ---------------------------------------------------------------
@@ -147,9 +148,9 @@ def test_invalid_values_are_not_published(store, nasa, bad):
 
 def test_manifest_is_503_while_the_scene_is_not_ready(nasa):
     nasa.fail = True
-    store = SceneStore(nasa.client())
+    store = SceneStore(AerosolSource(nasa.client()))
     store.refresh()
-    api = TestClient(create_app(Settings(cors_origins=[]), scenes=store))
+    api = TestClient(create_app(Settings(cors_origins=[]), scenes={"aerosol-latest": store}))
 
     response = api.get(MANIFEST)
     assert response.status_code == 503

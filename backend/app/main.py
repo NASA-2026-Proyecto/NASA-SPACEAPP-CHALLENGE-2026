@@ -12,18 +12,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __version__
 from app.api import router as api_router
 from app.config import Settings, get_settings
+from app.services.aerosol_scene import AerosolSource
 from app.services.geosfp import GeosFpClient
+from app.services.pm25_scene import Pm25Source
 from app.services.scenes import SceneStore
+from app.services.svs import SvsClient
 
 
-def create_app(settings: Settings | None = None, scenes: SceneStore | None = None) -> FastAPI:
+def default_scenes(settings: Settings) -> dict[str, SceneStore]:
+    sources = [
+        AerosolSource(GeosFpClient(), steps=settings.scene_steps),  # API casi en tiempo real
+        Pm25Source(SvsClient()),  # visualización diaria del EIC
+    ]
+    return {source.scene_id: SceneStore(source) for source in sources}
+
+
+def create_app(settings: Settings | None = None, scenes: dict[str, SceneStore] | None = None) -> FastAPI:
     settings = settings or get_settings()
-    scenes = scenes or SceneStore(GeosFpClient(), steps=settings.scene_steps)
+    scenes = default_scenes(settings) if scenes is None else scenes
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         if settings.scene_warmup:
-            scenes.get()  # no espera: lanza la descarga de la NASA en segundo plano
+            for store in scenes.values():
+                store.get()  # no espera: lanza la descarga de la NASA en segundo plano
         yield
 
     app = FastAPI(

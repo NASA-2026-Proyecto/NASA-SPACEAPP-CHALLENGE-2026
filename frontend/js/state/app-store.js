@@ -16,8 +16,9 @@ export const store = createStore({
   nightMode: false,
   selectedMarker: null,
   species: initialSpecies,
-  sceneStep:0,
+  sceneStep: 0,
   scenePlaying: false,
+  sceneInfo: {}, // por id de escena: { stamp } cuando está cargada
 });
 
 export function setLayerVisible(id, visible) {
@@ -48,4 +49,10 @@ export function setSceneStep(step) {
 
 export function setScenePlaying(playing) {
   store.setState({ scenePlaying: playing });
+}
+
+export function setSceneInfo(sceneId, info) {
+  store.setState((state) => ({
+    sceneInfo: { ...state.sceneInfo, [sceneId]: info },
+  }));
 }

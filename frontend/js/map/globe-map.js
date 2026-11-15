@@ -1,15 +1,15 @@
 import * as maplibregl from 'https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs';
 import { LAYERS } from '../config.js';
 import { readCssToken } from '../core/css-tokens.js';
-import { store, setSceneStep } from '../state/app-store.js';
+import { store, setSceneInfo } from '../state/app-store.js';
 import { startAutoSpin } from './auto-spin.js';
 import { buildGibsSource } from './gibs.js';
 import { reducedMotionQuery } from '../core/motion.js';
 import { addNightLights, syncNight } from './night-lights.js';
 import { addLandDots, DOTS_SOURCE, DOTS_LAYER } from './land-dots.js';
 import { createHoverGlow } from './hover-glow.js';
-import { SCENES } from '../catalog/scenes.js';
-import { isSceneLayer } from '../core/layers.js';
+import { findScene } from '../catalog/scenes.js';
+import { isSceneLayer, sceneIdOf } from '../core/layers.js';
 import { loadScene } from '../data/scene-data.js';
 import { createSeriesLayer } from './series-layer.js';
 
@@ -145,31 +145,40 @@ export async function createGlobeMap({ container }) {
     }
   }
 
-  // Las escenas se descargan la primera vez que se activa su capa, no al abrir la página.
-  // Si aún no están listas (la API las prepara con datos de la NASA) se reintenta mientras
-  // la capa siga activa.
+  // Cada escena se descarga la primera vez que hace falta: con su capa activa y una de
+  // sus especies elegida. Si aún no está lista (la API la prepara con datos de la NASA)
+  // se reintenta mientras siga haciendo falta.
   const seriesLayers = [];
   const requestedScenes = new Set();
-  let sceneRetryTimer = null;
+  const sceneRetryTimers = new Set();
   function loadScenesOnDemand(state) {
     for (const layer of LAYERS.filter(isSceneLayer)) {
-      if (!state.layers[layer.id] || requestedScenes.has(layer.id)) continue;
-      requestedScenes.add(layer.id);
-      const entry = SCENES.find((scene) => scene.id === layer.sceneId);
+      const sceneId = sceneIdOf(layer, state.species[layer.id]);
+      if (!state.layers[layer.id] || !sceneId || requestedScenes.has(sceneId)) continue;
+      requestedScenes.add(sceneId);
+      const entry = findScene(sceneId);
       loadScene(entry.dataUrl)
         .then((scene) => {
           seriesLayers.push(
-            createSeriesLayer(map, { layerId: layer.id, scene, species: entry.species, beforeId })
+            createSeriesLayer(map, {
+              id: `${layer.id}-${sceneId}`,
+              layerId: layer.id,
+              scene,
+              species: entry.species,
+              live: entry.live,
+              beforeId,
+            })
           );
-          if (entry.live) setSceneStep(scene.time.steps - 1);
-          sync(store.getState());
+          setSceneInfo(sceneId, { stamp: scene.time.stamps_utc.at(-1) });
         })
         .catch((error) => {
-          console.warn(`[mapa] Sin datos para la capa "${layer.id}"; se reintentará:`, error);
-          sceneRetryTimer = setTimeout(() => {
-            requestedScenes.delete(layer.id);
+          console.warn(`[mapa] Sin datos para la escena "${sceneId}"; se reintentará:`, error);
+          const timer = setTimeout(() => {
+            sceneRetryTimers.delete(timer);
+            requestedScenes.delete(sceneId);
             sync(store.getState());
           }, SCENE_RETRY_MS);
+          sceneRetryTimers.add(timer);
         });
     }
   }
@@ -232,7 +241,7 @@ export async function createGlobeMap({ container }) {
       hoverGlow?.destroy();
       stopSpin();
       popup?.remove();
-      clearTimeout(sceneRetryTimer);
+      sceneRetryTimers.forEach(clearTimeout);
       seriesLayers.forEach((series) => series.destroy());
       map.remove();
     },

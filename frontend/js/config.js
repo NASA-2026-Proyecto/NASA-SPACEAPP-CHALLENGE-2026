@@ -8,9 +8,17 @@
 //   paint                 -> ajustes de color del ráster (hue-rotate, saturation, contrast...)
 //   source                -> origen de los datos (NASA GIBS). SIN "source" la capa aparece
 //                            como "Pendiente"; al añadirlo, se activa sola.
-import { SCENES } from './catalog/scenes.js';
+//   kind: 'scene' + scenes -> la capa dibuja escenas (js/catalog/scenes.js). Cada botón de
+//                            especie pertenece a una escena; el primero es el de por defecto.
+import { findScene } from './catalog/scenes.js';
 
-const AEROSOL_SCENE = SCENES.find((scene) => scene.id === 'aerosol-latest');
+// Aerosoles: primero la visualización diaria del EIC (PM2.5) y después las especies del
+// modelo casi en tiempo real.
+const AEROSOL_SCENES = ['pm25-latest', 'aerosol-latest'];
+const speciesOf = (sceneIds) =>
+  sceneIds.flatMap((sceneId) =>
+    findScene(sceneId).species.map((species) => ({ ...species, sceneId }))
+  );
 
 export const LAYERS = [
   {
@@ -38,10 +46,9 @@ export const LAYERS = [
     icon: 'haze',
     ramp: ['#ffe29a', '#ff9f43', '#c44569'],
     defaultOpacity: 0.85,
-    badge: 'Modelo',
+    badge: 'NASA',
     kind: 'scene',
-    sceneId: AEROSOL_SCENE.id,
-    defaultSpecies: AEROSOL_SCENE.defaultSpecies,
-    species: AEROSOL_SCENE.species,
+    scenes: AEROSOL_SCENES,
+    species: speciesOf(AEROSOL_SCENES),
   },
 ];

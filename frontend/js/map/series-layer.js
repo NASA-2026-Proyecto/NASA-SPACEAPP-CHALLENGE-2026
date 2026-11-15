@@ -5,6 +5,12 @@ const MAX_ALPHA = 0.92;
 const FLOOR = 0.04;
 const FEATHER_CELLS = 12;
 const MERCATOR_MAX_LAT = 85.0511287798;
+const MAX_CANVAS_WIDTH = 1100; // el lienzo se vuelve a subir a la GPU en cada fotograma
+const RAMP_SIZE = 256;
+// Escalas con rampa (0..1): por debajo de RAMP_CLEAR es transparente y a partir de
+// RAMP_SOLID tiene la opacidad máxima, para que el aire limpio deje ver el mapa.
+const RAMP_CLEAR = 0.08;
+const RAMP_SOLID = 0.45;
 
 const smooth = (t) => t * t * (3 - 2 * t);
 const mercatorY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
@@ -17,7 +23,8 @@ function buildGeometry(grid) {
   const east = periodic ? grid.lon_min + 360 : grid.lon_min + (grid.n_lon - 1) * grid.lon_step;
   const south = Math.max(grid.lat_min, -MERCATOR_MAX_LAT);
   const north = Math.min(grid.lat_min + (grid.n_lat - 1) * grid.lat_step, MERCATOR_MAX_LAT);
-  const pixelsPerCell = periodic ? 3 : 4;
+  const wanted = periodic ? 3 : 4;
+  const pixelsPerCell = Math.max(1, Math.min(wanted, Math.round(MAX_CANVAS_WIDTH / grid.n_lon)));
   const width = grid.n_lon * pixelsPerCell;
   const spanY = mercatorY(north) - mercatorY(south);
   const spanX = ((east - west) * Math.PI) / 180;
@@ -36,12 +43,33 @@ function buildPalette(species) {
   );
 }
 
-export function createSeriesLayer(map, { layerId, scene, species, beforeId }) {
+// Tabla de colores a partir de las paradas de la rampa que publica el manifiesto
+// (los colores de la propia barra de la NASA), interpolando entre paradas.
+function buildRampTable(stops) {
+  const colors = stops.map(hexToRgb);
+  const table = new Uint8ClampedArray(RAMP_SIZE * 3);
+  for (let i = 0; i < RAMP_SIZE; i += 1) {
+    const position = (i / (RAMP_SIZE - 1)) * (colors.length - 1);
+    const low = Math.min(Math.floor(position), colors.length - 2);
+    const t = position - low;
+    for (let channel = 0; channel < 3; channel += 1) {
+      table[i * 3 + channel] = colors[low][channel] * (1 - t) + colors[low + 1][channel] * t;
+    }
+  }
+  return table;
+}
+
+// Dibuja una escena (serie de mallas) como capa ráster sobre el globo.
+//   id       -> id de la fuente y la capa en el mapa
+//   layerId  -> capa del panel a la que pertenece (visibilidad, opacidad y especie elegida)
+//   species  -> especies de esta escena; la capa solo se ve si la elegida es una de ellas
+//   live     -> true: se muestra siempre el paso más reciente de la escena
+export function createSeriesLayer(map, { id, layerId, scene, species, live = false, beforeId }) {
   const geometry = buildGeometry(scene.grid);
   const { width, height } = geometry;
 
   const canvas = document.createElement('canvas');
-  canvas.id = `${layerId}-canvas`;
+  canvas.id = `${id}-canvas`;
   canvas.width = width;
   canvas.height = height;
   canvas.style.cssText = 'position:absolute;left:-9999px;top:0;';
@@ -71,9 +99,10 @@ export function createSeriesLayer(map, { layerId, scene, species, beforeId }) {
   const resample = createResampler(scene, lats, lons);
   const field = new Float32Array(width * height);
   const palette = buildPalette(species);
+  const rampTables = new Map();
   let current = { speciesId: null, step: null };
 
-  map.addSource(layerId, {
+  map.addSource(id, {
     type: 'canvas',
     canvas: canvas.id,
     animate: true,
@@ -86,20 +115,19 @@ export function createSeriesLayer(map, { layerId, scene, species, beforeId }) {
   });
   map.addLayer(
     {
-      id: layerId,
+      id,
       type: 'raster',
-      source: layerId,
+      source: id,
       layout: { visibility: 'none' },
       paint: { 'raster-opacity': 0.85, 'raster-fade-duration': 0 },
     },
     beforeId
   );
 
-  function paint(speciesId, step) {
+  // Un solo color por especie: más claro y más opaco cuanto mayor es el valor.
+  function paintTint(speciesId) {
     const scale = scene.manifest.species[speciesId].display_scale_max;
     const { base, dark, light } = palette.get(speciesId);
-    resample(speciesId, step, field);
-
     const data = image.data;
     for (let r = 0; r < height; r += 1) {
       for (let c = 0; c < width; c += 1) {
@@ -122,25 +150,60 @@ export function createSeriesLayer(map, { layerId, scene, species, beforeId }) {
         data[offset + 3] = shaped * MAX_ALPHA * 255 * fadeRows[r] * fadeCols[c];
       }
     }
+  }
+
+  // Escala logarítmica con la rampa de colores original (p. ej. la barra de la NASA).
+  // Los huecos (NaN: donde la imagen de origen no tenía dato) quedan transparentes.
+  function paintRamp(speciesId, scale) {
+    if (!rampTables.has(speciesId)) rampTables.set(speciesId, buildRampTable(scale.ramp));
+    const table = rampTables.get(speciesId);
+    const logMin = Math.log(scale.min);
+    const logSpan = Math.log(scale.max) - logMin;
+    const data = image.data;
+    for (let r = 0; r < height; r += 1) {
+      for (let c = 0; c < width; c += 1) {
+        const i = r * width + c;
+        const offset = i * 4;
+        const position = (Math.log(field[i]) - logMin) / logSpan;
+        if (!(position > RAMP_CLEAR)) {
+          data[offset + 3] = 0;
+          continue;
+        }
+        const clamped = Math.min(position, 1);
+        const entry = Math.round(clamped * (RAMP_SIZE - 1)) * 3;
+        data[offset] = table[entry];
+        data[offset + 1] = table[entry + 1];
+        data[offset + 2] = table[entry + 2];
+        const strength = smooth(Math.min((clamped - RAMP_CLEAR) / (RAMP_SOLID - RAMP_CLEAR), 1));
+        data[offset + 3] = strength * MAX_ALPHA * 255 * fadeRows[r] * fadeCols[c];
+      }
+    }
+  }
+
+  function paint(speciesId, step) {
+    resample(speciesId, step, field);
+    const scale = scene.manifest.species[speciesId].scale;
+    if (scale?.kind === 'log' && scale.ramp) paintRamp(speciesId, scale);
+    else paintTint(speciesId);
     context.putImageData(image, 0, 0);
   }
 
   function sync(state) {
-    const visible = Boolean(state.layers[layerId]);
-    map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
-    map.setPaintProperty(layerId, 'raster-opacity', state.opacity[layerId]);
+    const speciesId = state.species[layerId];
+    const visible = Boolean(state.layers[layerId]) && palette.has(speciesId);
+    map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+    map.setPaintProperty(id, 'raster-opacity', state.opacity[layerId]);
     if (!visible) return;
 
-    const speciesId = state.species[layerId];
-    const step = state.sceneStep;
+    const step = live ? scene.time.steps - 1 : state.sceneStep;
     if (speciesId === current.speciesId && step === current.step) return;
     current = { speciesId, step };
     paint(speciesId, step);
   }
 
   function destroy() {
-    if (map.getLayer(layerId)) map.removeLayer(layerId);
-    if (map.getSource(layerId)) map.removeSource(layerId);
+    if (map.getLayer(id)) map.removeLayer(id);
+    if (map.getSource(id)) map.removeSource(id);
     canvas.remove();
   }
 

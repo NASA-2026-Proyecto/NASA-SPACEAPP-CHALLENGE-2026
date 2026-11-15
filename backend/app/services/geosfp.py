@@ -6,9 +6,6 @@ binario (.dods). El servidor responde a veces con 502/504, de ahí los reintento
 
 import re
 import struct
-import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -16,10 +13,11 @@ from urllib.parse import quote
 
 import numpy as np
 
+from app.services.http import http_get
+
 # Análisis ("assim") de aerosoles: medias de 3 h en una malla de 0,25° x 0,3125°
 DATASET_URL = "https://opendap.nccs.nasa.gov/dods/GEOS-5/fp/0.25_deg/assim/tavg3_2d_aer_Nx"
 FILL_LIMIT = 1.0e14  # el servidor marca los huecos con 1e15
-USER_AGENT = "earth-jukebox-api"
 
 _STEP_UNITS = {"mn": "minutes", "hr": "hours", "dy": "days"}
 
@@ -84,23 +82,6 @@ def parse_dods(body: bytes, shape: tuple[int, ...]) -> np.ndarray:
         raise ValueError(f"La matriz trae {declared[0]} valores, se esperaban {count}.")
     values = np.frombuffer(body, dtype=">f4", count=count, offset=start + 8)
     return values.reshape(shape).astype("<f4")
-
-
-def http_get(url: str, timeout: float = 60.0, attempts: int = 4) -> bytes:
-    """GET con reintentos ante errores de servidor, cortes y tiempos de espera."""
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    for attempt in range(1, attempts + 1):
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                return response.read()
-        except urllib.error.HTTPError as error:
-            if error.code < 500 or attempt == attempts:
-                raise
-        except (urllib.error.URLError, TimeoutError):
-            if attempt == attempts:
-                raise
-        time.sleep(3.0 * attempt)
-    raise AssertionError("inalcanzable")
 
 
 class GeosFpClient:
