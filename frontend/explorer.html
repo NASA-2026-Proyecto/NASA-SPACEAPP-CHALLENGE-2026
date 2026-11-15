@@ -84,21 +84,24 @@
     </div>
   </main>
 
-  <!-- DERECHA · Sonido del punto seleccionado (lo controla js/ui/player.js mediante los data-*) -->
+  <!-- DERECHA · Punto seleccionado: su sonido (js/ui/player.js, mediante los data-*) y su
+       ficha de datos (js/ui/point-card.js, que js/pages/explorer.js coloca en los dos huecos) -->
   <section class="ej-panel ej-panel--signal" id="player" aria-labelledby="signal-title">
     <div class="ej-panel__header">
       <span class="ej-panel__badge ej-panel__badge--violet" data-icon="signal" aria-hidden="true"></span>
       <div class="ej-panel__heading">
-        <h2 id="signal-title" class="ej-panel__title">Sonido del punto</h2>
+        <h2 id="signal-title" class="ej-panel__title">Punto seleccionado</h2>
         <p class="ej-player__sub" data-player-sub>Sin capa activa: no suena nada. Activa una capa de datos.</p>
       </div>
       <button class="ej-icon-btn" type="button" aria-expanded="true" aria-controls="signal-body" data-panel-toggle
-        data-panel-name="sonido" aria-label="Plegar panel de sonido">
+        data-panel-name="punto" aria-label="Plegar panel de punto">
         <span aria-hidden="true">–</span>
       </button>
     </div>
 
     <div id="signal-body" class="ej-panel__body">
+      <div id="point-coords" hidden></div>
+
       <dl class="ej-player__readout">
         <div class="ej-stat ej-stat--tone">
           <dt><span class="ej-stat__icon" data-icon="tone" aria-hidden="true"></span>Capa</dt>
@@ -137,6 +140,8 @@
       </div>
 
       <p class="ej-player__description" aria-live="polite" data-player-description></p>
+
+      <div id="point-card" hidden></div>
     </div>
   </section>
 
